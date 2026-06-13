@@ -10,6 +10,8 @@ export interface Transaction {
   description?: string;
   isRecurring?: boolean;
   currency?: string; // Optional code like 'INR', 'USD', 'EUR', etc.
+  notes?: string; // Additional user-written notes
+  tags?: string[]; // Custom tags for filtering
 }
 
 export interface Budget {
@@ -54,3 +56,30 @@ export interface CategorySpec {
   glowClass: string; // Custom glow classes for visual elegance
   isIncome?: boolean; // True for deposit inflow classification
 }
+
+export interface CategorizationRule {
+  id: string;
+  keyword: string;
+  category: string;
+  type: TransactionType;
+  tags?: string[];
+  isActive: boolean;
+}
+
+export interface TreasuryPot {
+  id: string;
+  name: string;
+  percent: number; // Slider ratio allocation
+  color: string;
+  icon: string;
+}
+
+export interface FinancialGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  potId: string; // Backing pot
+  deadline: string;
+  isCompleted: boolean;
+}
+

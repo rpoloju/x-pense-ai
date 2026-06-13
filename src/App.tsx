@@ -25,21 +25,22 @@ import {
   Upload,
   ChevronDown,
   MessageSquare,
-  Bell
+  Bell,
+  Tag,
+  PiggyBank,
+  Command,
+  HelpCircle
 } from "lucide-react";
 
 import { Transaction, Budget } from "./types";
 import { INITIAL_TRANSACTIONS, CATEGORIES } from "./data";
 import { 
   auth, 
-  isFirebaseConfigured, 
-  backupTransactionsToCloud, 
-  syncSingleTransactionToCloud,
-  deleteSingleTransactionFromCloud
+  isFirebaseConfigured
 } from "./lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
 import { Dashboard } from "./components/Dashboard";
 import { TransactionHistory } from "./components/TransactionHistory";
+import { TreasuryHub } from "./components/TreasuryHub";
 import { BudgetSettings } from "./components/BudgetSettings";
 import { AIAdvisor } from "./components/AIAdvisor";
 import { FinancialCalculators } from "./components/FinancialCalculators";
@@ -47,6 +48,7 @@ import { SMSSyncHub } from "./components/SMSSyncHub";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { CategoryIcon } from "./components/CategoryIcon";
 import { CURRENCIES, DEFAULT_EXCHANGE_RATES, convertAmount, formatCurrencyValue } from "./utils/currencyUtils";
+import { CommandPalette } from "./components/CommandPalette";
 
 interface AvatarProps {
   src: string;
@@ -82,16 +84,21 @@ function AvatarComponent({ src, name, className = "w-10 h-10" }: AvatarProps) {
 
 export default function App() {
   // Tabs: 'dashboard' | 'transactions' | 'budget' | 'ai'
-  const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [activeTab, setActiveTab ] = useState<string>("dashboard");
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
   const [showWelcome, setShowWelcome] = useState<boolean>(true);
   const [userName, setUserName] = useState<string>(() => {
-    return localStorage.getItem("aura_user_name") || "Ravi";
+    return localStorage.getItem("aura_user_name") || "";
   });
   const [profilePic, setProfilePic] = useState<string>(() => {
-    return localStorage.getItem("aura_profile_pic") || "preset-1";
+    const val = localStorage.getItem("aura_profile_pic") || "preset-1";
+    if (val === "preset-2" || val === "preset-3" || val === "preset-4") {
+      return "preset-1";
+    }
+    return val;
   });
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState<boolean>(false);
-  const [firebaseUser, setFirebaseUser] = useState<any>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -106,9 +113,54 @@ export default function App() {
     }
   };
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [availableTags, setAvailableTags] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem("aura_available_tags");
+      return stored ? JSON.parse(stored) : ["Urgent", "Personal", "Business", "Subscription", "Leisure"];
+    } catch {
+      return ["Urgent", "Personal", "Business", "Subscription", "Leisure"];
+    }
+  });
+
+  const handleCreateTag = (tag: string) => {
+    const trimmed = tag.trim();
+    if (!trimmed) return;
+    if (availableTags.includes(trimmed)) return;
+    const updated = [...availableTags, trimmed];
+    setAvailableTags(updated);
+    localStorage.setItem("aura_available_tags", JSON.stringify(updated));
+  };
+
+  const handleDeleteTag = (tag: string) => {
+    const updated = availableTags.filter(t => t !== tag);
+    setAvailableTags(updated);
+    localStorage.setItem("aura_available_tags", JSON.stringify(updated));
+  };
+
+  const handleUpdateTransactionTags = (id: string, tags: string[]) => {
+    const updated = transactions.map(t => t.id === id ? { ...t, tags } : t);
+    syncTransactions(updated);
+    if (selectedTransaction?.id === id) {
+      setSelectedTransaction({ ...selectedTransaction, tags });
+    }
+  };
+
   const [monthlyBudget, setMonthlyBudget] = useState<number>(60000); // 60,000 INR default
   const [categoryBudgets, setCategoryBudgets] = useState<Budget[]>([]);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [editingNotes, setEditingNotes] = useState("");
+  const [newFlyoutTagInput, setNewFlyoutTagInput] = useState("");
+
+  // Update editing state whenever transaction is selected
+  useEffect(() => {
+    if (selectedTransaction) {
+      setEditingNotes(selectedTransaction.notes || "");
+      setNewFlyoutTagInput("");
+    } else {
+      setEditingNotes("");
+      setNewFlyoutTagInput("");
+    }
+  }, [selectedTransaction]);
 
   const [displayCurrency, setDisplayCurrency] = useState<string>(() => {
     return localStorage.getItem("aura_display_currency") || "INR";
@@ -250,54 +302,7 @@ export default function App() {
     }
   }, []);
 
-  // Listen to Google Auth State Changes
-  useEffect(() => {
-    if (!auth) return;
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user);
-      if (user) {
-        if (user.displayName) {
-          setUserName(user.displayName);
-          localStorage.setItem("aura_user_name", user.displayName);
-        }
-        if (user.photoURL) {
-          setProfilePic(user.photoURL);
-          localStorage.setItem("aura_profile_pic", user.photoURL);
-        }
-      }
-    });
-    return () => unsubscribe();
-  }, []);
 
-  // 2 AM Daily Automatic Cloud Backup Sync
-  useEffect(() => {
-    if (!auth) return;
-    const checkAndSyncAt2AM = () => {
-      const user = auth.currentUser;
-      if (!user) return;
-      
-      const now = new Date();
-      if (now.getHours() === 2) {
-        const dateStr = now.toDateString();
-        const lastSyncDate = localStorage.getItem("aura_last_2am_sync_date");
-        if (lastSyncDate !== dateStr) {
-          console.log("Auto-backup triggered at 2:00 AM.");
-          backupTransactionsToCloud(user.uid, transactions)
-            .then(() => {
-              localStorage.setItem("aura_last_2am_sync_date", dateStr);
-              console.log("2AM cloud backup succeeded.");
-            })
-            .catch(err => {
-              console.error("2AM cloud backup failed:", err);
-            });
-        }
-      }
-    };
-
-    checkAndSyncAt2AM();
-    const interval = setInterval(checkAndSyncAt2AM, 60000);
-    return () => clearInterval(interval);
-  }, [transactions]);
 
   // Update localStorage helper
   const syncTransactions = (updated: Transaction[]) => {
@@ -318,11 +323,6 @@ export default function App() {
     };
     const updated = [freshTx, ...transactions];
     syncTransactions(updated);
-
-    const user = auth?.currentUser;
-    if (user) {
-      syncSingleTransactionToCloud(user.uid, freshTx).catch(err => console.error("Cloud insert failed:", err));
-    }
   };
 
   const handleImportTransactions = (imported: Omit<Transaction, "id">[]) => {
@@ -333,11 +333,6 @@ export default function App() {
     }));
     const updated = [...freshTxList, ...transactions];
     syncTransactions(updated);
-
-    const user = auth?.currentUser;
-    if (user) {
-      backupTransactionsToCloud(user.uid, updated).catch(err => console.error("Cloud batch sync failed:", err));
-    }
   };
 
   const handleDeleteTransaction = (id: string) => {
@@ -346,10 +341,14 @@ export default function App() {
     if (selectedTransaction?.id === id) {
       setSelectedTransaction(null);
     }
+  };
 
-    const user = auth?.currentUser;
-    if (user) {
-      deleteSingleTransactionFromCloud(user.uid, id).catch(err => console.error("Cloud delete failed:", err));
+  const handleSaveTransactionNotes = (id: string, notes: string) => {
+    const trimmedNotes = notes.trim();
+    const updated = transactions.map(t => t.id === id ? { ...t, notes: trimmedNotes || undefined } : t);
+    syncTransactions(updated);
+    if (selectedTransaction?.id === id) {
+      setSelectedTransaction({ ...selectedTransaction, notes: trimmedNotes || undefined });
     }
   };
 
@@ -367,6 +366,7 @@ export default function App() {
   // Navigations mapping
   const navigationItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "treasury", label: "Treasury Pots", icon: PiggyBank, highlight: true },
     { id: "transactions", label: "Transactions", icon: BookOpen },
     { id: "sms-sync", label: "SMS Sync", icon: MessageSquare },
     { id: "notifications", label: "Notifications", icon: Bell },
@@ -383,7 +383,7 @@ export default function App() {
   };
 
   return (
-    <div id="aura-app" className="bg-[#050505] min-h-screen text-white flex flex-col justify-between overflow-x-hidden font-sans select-none antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
+    <div id="aura-app" className="relative bg-[#050505] min-h-screen text-white flex flex-col justify-between overflow-x-hidden font-sans select-none antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
       
       {/* GLOW DECORATIONS */}
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-cyan-500/5 rounded-full blur-[140px] pointer-events-none" />
@@ -450,53 +450,32 @@ export default function App() {
                 
                 <div className="space-y-1.5">
                   <h1 className="text-2xl font-sans font-extrabold tracking-tight text-white leading-tight">
-                    {getGreeting()}, <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400">{userName}</span>
+                    {userName.trim() ? (
+                      <>
+                        {getGreeting()}, <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400">{userName}</span>
+                      </>
+                    ) : (
+                      "Welcome to Aura Ledger"
+                    )}
                   </h1>
                   
                   {/* Custom Name input box */}
-                  <div className="flex justify-center items-center gap-2 mt-1 bg-white/[0.015] border border-white/5 rounded-xl px-2.5 py-1 w-fit mx-auto">
-                    <span className="text-[10px] font-mono text-white/30 uppercase tracking-wider">SECURE NAME:</span>
+                  <div className="flex flex-col gap-2 mt-4 bg-white/[0.015] border border-white/5 rounded-2xl p-4 w-full max-w-xs mx-auto">
+                    <span className="text-[9px] font-mono text-white/35 uppercase tracking-wider font-bold">
+                      {userName.trim() ? "UPDATE PORTAL PROFILE NAME:" : "ENTER YOUR NAME TO ACCESS PORTAL:"}
+                    </span>
                     <input
                       type="text"
                       id="name-input"
                       value={userName}
                       onChange={(e) => {
                         const val = e.target.value.slice(0, 16);
-                        setUserName(val || "Ravi");
-                        localStorage.setItem("aura_user_name", val || "Ravi");
+                        setUserName(val);
+                        localStorage.setItem("aura_user_name", val);
                       }}
-                      className="bg-transparent text-xs text-cyan-400 font-mono font-bold focus:outline-none w-20 border-b border-transparent focus:border-cyan-400 transition-all text-center select-all"
-                      placeholder="Ravi"
+                      className="bg-white/5 border border-white/10 rounded-xl text-xs text-[#00F5FF] font-mono font-bold focus:outline-none focus:border-[#00F5FF]/50 py-2.5 px-3 transition-all text-center select-all w-full"
+                      placeholder="e.g. John Doe"
                     />
-                  </div>
-
-                  {/* Preset Avatar Selection Row */}
-                  <div className="flex items-center justify-center gap-2 mt-3 p-1 bg-white/[0.01] border border-white/5 rounded-xl w-fit mx-auto pr-2 pl-2">
-                    <span className="text-[8px] font-mono text-white/35 uppercase tracking-widest pr-1">AVATAR PRESETS:</span>
-                    <div className="flex items-center gap-1.5">
-                      {["preset-1", "preset-2", "preset-3", "preset-4"].map((presetId) => {
-                        let presetGrad = "from-cyan-400 to-blue-600";
-                        if (presetId === "preset-2") presetGrad = "from-emerald-400 to-teal-600";
-                        if (presetId === "preset-3") presetGrad = "from-purple-500 to-rose-500";
-                        if (presetId === "preset-4") presetGrad = "from-amber-400 to-orange-500";
-                        
-                        const isSelected = profilePic === presetId;
-                        return (
-                          <button
-                            key={presetId}
-                            onClick={() => {
-                              setProfilePic(presetId);
-                              localStorage.setItem("aura_profile_pic", presetId);
-                            }}
-                            className={`w-4.5 h-4.5 rounded-full bg-gradient-to-tr ${presetGrad} border transition-all cursor-pointer relative flex items-center justify-center ${
-                              isSelected ? "border-cyan-400 scale-110 ring-2 ring-cyan-400/20" : "border-white/15 hover:scale-105"
-                            }`}
-                          >
-                            {isSelected && <div className="w-1 h-1 rounded-full bg-white select-none pointer-events-none" />}
-                          </button>
-                        );
-                      })}
-                    </div>
                   </div>
                 </div>
 
@@ -508,12 +487,21 @@ export default function App() {
               {/* Proceed CTA button */}
               <motion.button
                 id="enter-dashboard"
-                whileHover={{ scale: 1.015, boxShadow: "0 0 20px rgba(6, 182, 212, 0.25)" }}
-                whileTap={{ scale: 0.985 }}
-                onClick={() => setShowWelcome(false)}
-                className="w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-mono font-black uppercase tracking-widest flex items-center justify-center gap-2.5 shadow-lg shadow-cyan-500/10 cursor-pointer relative group overflow-hidden border border-white/10"
+                disabled={!userName.trim()}
+                whileHover={userName.trim() ? { scale: 1.015, boxShadow: "0 0 20px rgba(6, 182, 212, 0.25)" } : {}}
+                whileTap={userName.trim() ? { scale: 0.985 } : {}}
+                onClick={() => {
+                  if (userName.trim()) {
+                    setShowWelcome(false);
+                  }
+                }}
+                className={`w-full py-4 rounded-2xl text-white text-xs font-mono font-black uppercase tracking-widest flex items-center justify-center gap-2.5 transition-all ${
+                  userName.trim() 
+                    ? "bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-lg shadow-cyan-500/10 cursor-pointer border border-white/10" 
+                    : "bg-white/5 text-white/20 border border-white/5 cursor-not-allowed opacity-50"
+                }`}
               >
-                GET INSIDE DASHBOARD
+                {userName.trim() ? "ENTER DASHBOARD PORTAL" : "ENTER YOUR NAME TO UNLOCK"}
                 <ArrowRight className="w-4 h-4 translate-x-0 group-hover:translate-x-1.5 transition-transform" />
               </motion.button>
 
@@ -558,6 +546,7 @@ export default function App() {
                   <div className="hidden sm:flex items-center pl-3 border-l border-white/10 ml-1">
                     <span className="px-2.5 py-1 rounded-lg bg-cyan-500/5 border border-cyan-500/10 text-[9.5px] font-mono text-cyan-400 font-bold uppercase tracking-wider">
                       {activeTab === "dashboard" && "Dashboard Portal"}
+                      {activeTab === "treasury" && "Treasury & Asset Pools"}
                       {activeTab === "transactions" && "Cash Posting Ledger"}
                       {activeTab === "sms-sync" && "SMS Linked Ledger"}
                       {activeTab === "notifications" && "Auditing Alerts"}
@@ -593,6 +582,37 @@ export default function App() {
                   <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/5 text-[10px] font-mono text-[#00F5FF]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#00F5FF] animate-ping" />
                     <span>SECURE NODE</span>
+                  </div>
+
+                  {/* Interactive Command Palette search bar simulation / trigger */}
+                  <div className="relative" id="command-palette-trigger">
+                    <button
+                      onClick={() => setIsCommandPaletteOpen(true)}
+                      className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/10 hover:border-cyan-500/30 text-[10px] font-mono text-cyan-400 font-bold transition-all cursor-pointer uppercase"
+                      title="Open Keyboard Command Palette (Ctrl+K)"
+                    >
+                      <Command className="w-3.5 h-3.5" />
+                      <span>COMMANDS</span>
+                      <kbd className="px-1 py-0.5 rounded bg-cyan-400/10 text-cyan-400 text-[8px] border border-cyan-400/20">Ctrl K</kbd>
+                    </button>
+                    <button
+                      onClick={() => setIsCommandPaletteOpen(true)}
+                      className="sm:hidden p-2 rounded-xl bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/10 text-cyan-400 relative flex items-center justify-center cursor-pointer"
+                      title="Open Keyboard Command Palette"
+                    >
+                      <Command className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Dedicated Help shortcuts panel trigger */}
+                  <div className="relative" id="help-trigger">
+                    <button
+                      onClick={() => setIsHelpOpen(true)}
+                      className="p-2 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 hover:border-white/12 text-white/70 hover:text-white transition-all flex items-center justify-center cursor-pointer relative"
+                      title="Open Keyboard Shortcuts Guide (?)"
+                    >
+                      <HelpCircle className="w-4 h-4" />
+                    </button>
                   </div>
 
                   {/* Dynamic Alert Notification Bell */}
@@ -664,7 +684,6 @@ export default function App() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-sans font-extrabold text-white truncate leading-tight">{userName}</p>
-                                <p className="text-[9px] font-mono text-[#00F5FF] tracking-wider uppercase mt-0.5 truncate select-all">polojuraviteja@gmail.com</p>
                                 
                                 {/* Edit secure name input */}
                                 <div className="mt-1.5 flex items-center gap-1">
@@ -674,8 +693,8 @@ export default function App() {
                                     value={userName}
                                     onChange={(e) => {
                                       const val = e.target.value.slice(0, 16);
-                                      setUserName(val || "Ravi");
-                                      localStorage.setItem("aura_user_name", val || "Ravi");
+                                      setUserName(val);
+                                      localStorage.setItem("aura_user_name", val);
                                     }}
                                     className="bg-transparent text-[10px] text-cyan-400 border-b border-white/10 pb-0.5 font-mono focus:outline-none focus:border-cyan-400 w-24 px-0.5"
                                     placeholder="Update name"
@@ -761,6 +780,8 @@ export default function App() {
                               })}
                             </div>
 
+
+
                             {/* Session Lockout */}
                             <div className="p-1.5">
                               <button
@@ -806,6 +827,14 @@ export default function App() {
                       onSelectTransaction={(tx) => setSelectedTransaction(tx)}
                     />
                   )}
+
+                  {activeTab === "treasury" && (
+                    <TreasuryHub 
+                      transactions={transactions}
+                      displayCurrency={displayCurrency}
+                      exchangeRates={exchangeRates}
+                    />
+                  )}
                   
                   {activeTab === "transactions" && (
                     <TransactionHistory 
@@ -816,6 +845,10 @@ export default function App() {
                       onDeleteTransaction={handleDeleteTransaction}
                       onSelectTransaction={(tx) => setSelectedTransaction(tx)}
                       onImportTransactions={handleImportTransactions}
+                      availableTags={availableTags}
+                      onAddCustomTag={handleCreateTag}
+                      onDeleteCustomTag={handleDeleteTag}
+                      onSyncTransactions={syncTransactions}
                     />
                   )}
 
@@ -826,6 +859,7 @@ export default function App() {
                       exchangeRates={exchangeRates}
                       onAddTransaction={handleAddTransaction}
                       onSyncTransactions={syncTransactions}
+                      userName={userName}
                     />
                   )}
 
@@ -849,8 +883,6 @@ export default function App() {
                       exchangeRates={exchangeRates}
                       onUpdateMonthlyBudget={handleUpdateMonthlyBudget}
                       onUpdateCategoryBudget={handleUpdateCategoryBudget}
-                      firebaseUser={firebaseUser}
-                      onSetTransactions={setTransactions}
                     />
                   )}
 
@@ -936,7 +968,7 @@ export default function App() {
                         </div>
 
                         <div className="py-2 inline-block">
-                          <span className={`text-4xl font-mono font-bold tracking-tight ${selectedTransaction.type === 'expense' ? 'text-white' : 'text-cyan-405'}`}>
+                          <span className={`text-4xl font-mono font-bold tracking-tight ${selectedTransaction.type === 'expense' ? 'text-white' : 'text-cyan-400'}`}>
                             {selectedTransaction.type === 'expense' ? "-" : "+"}
                             {formatCurrencyValue(selectedTransaction.amount, selectedTransaction.currency || "INR")}
                           </span>
@@ -994,12 +1026,144 @@ export default function App() {
                       {/* Sub memo remarks description */}
                       {selectedTransaction.description && (
                         <div className="space-y-2 pt-4 border-t border-white/5">
-                          <h4 className="text-[10px] font-mono uppercase font-bold text-white/45 leading-none">Supplemental remarks notes</h4>
+                          <h4 className="text-[10px] font-mono uppercase font-bold text-white/45 leading-none">Supplemental remarks description</h4>
                           <div className="p-4 bg-white/[0.02] rounded-2xl border border-white/5 text-xs text-white/70 leading-relaxed font-sans italic">
                             "{selectedTransaction.description}"
                           </div>
                         </div>
                       )}
+
+                      {/* Attached/Interactive Transaction Tags section */}
+                      <div className="space-y-3 pt-4 border-t border-white/5 animate-fadeIn">
+                        <div className="flex justify-between items-center">
+                          <h4 className="text-[10px] font-mono uppercase font-bold text-[#00F5FF]">Transaction Tags</h4>
+                          <span className="text-[8px] font-mono text-white/30 uppercase">Enterprise metadata tagging</span>
+                        </div>
+
+                        {/* Rendering tags or empty state */}
+                        <div className="flex flex-wrap gap-1.5 min-h-[24px]">
+                          {selectedTransaction.tags && selectedTransaction.tags.length > 0 ? (
+                            selectedTransaction.tags.map(tag => (
+                              <span 
+                                key={tag}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#00F5FF]/10 border border-[#00F5FF]/15 text-[#00F5FF] text-[9px] font-mono uppercase font-bold"
+                              >
+                                #{tag}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextTags = (selectedTransaction.tags || []).filter(t => t !== tag);
+                                    handleUpdateTransactionTags(selectedTransaction.id, nextTags);
+                                  }}
+                                  className="p-0.5 rounded hover:bg-[#00F5FF] hover:text-black transition-all cursor-pointer"
+                                  title="Remove Tag"
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-white/30 font-mono text-[10px] italic">No active tags attached.</span>
+                          )}
+                        </div>
+
+                        {/* Available Tags Toggles inside the drawer */}
+                        <div className="space-y-1">
+                          <span className="text-[9px] font-mono text-white/30 block uppercase">TAGS LIBRARY TOGGLES</span>
+                          <div className="flex flex-wrap gap-1 bg-black/40 border border-white/5 rounded-xl p-2 max-h-20 overflow-y-auto">
+                            {availableTags.map((tag) => {
+                              const hasTag = selectedTransaction.tags?.includes(tag);
+                              return (
+                                <button
+                                  key={tag}
+                                  onClick={() => {
+                                    const tags = selectedTransaction.tags || [];
+                                    const updated = hasTag
+                                      ? tags.filter((t) => t !== tag)
+                                      : [...tags, tag];
+                                    handleUpdateTransactionTags(selectedTransaction.id, updated);
+                                  }}
+                                  className={`px-2 py-0.5 rounded-md text-[9px] font-mono transition-all flex items-center gap-1 cursor-pointer select-none ${
+                                    hasTag
+                                      ? "bg-[#00F5FF]/20 text-[#00F5FF] border border-[#00F5FF]/30"
+                                      : "bg-white/[0.01] border border-white/5 text-white/30 hover:bg-white/[0.04]"
+                                  }`}
+                                >
+                                  <Tag className="w-2 h-2" />
+                                  {tag}
+                                </button>
+                              );
+                            })}
+                            {availableTags.length === 0 && (
+                              <span className="text-[9px] text-white/20 font-mono italic">No tags in library. Create below.</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Tag submission form */}
+                        <div className="flex gap-2">
+                          <input 
+                            type="text"
+                            placeholder="Add new tag to library and post..."
+                            value={newFlyoutTagInput}
+                            onChange={(e) => setNewFlyoutTagInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const val = newFlyoutTagInput.trim();
+                                if (val) {
+                                  handleCreateTag(val);
+                                  const currentTags = selectedTransaction.tags || [];
+                                  if (!currentTags.includes(val)) {
+                                    handleUpdateTransactionTags(selectedTransaction.id, [...currentTags, val]);
+                                  }
+                                  setNewFlyoutTagInput("");
+                                }
+                              }
+                            }}
+                            className="flex-1 bg-black border border-white/5 rounded-xl px-3 py-2 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400/50 transition-all font-sans"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = newFlyoutTagInput.trim();
+                              if (val) {
+                                handleCreateTag(val);
+                                const currentTags = selectedTransaction.tags || [];
+                                if (!currentTags.includes(val)) {
+                                  handleUpdateTransactionTags(selectedTransaction.id, [...currentTags, val]);
+                                }
+                                setNewFlyoutTagInput("");
+                              }
+                            }}
+                            className="px-3 py-2 bg-[#00F5FF] hover:bg-cyan-400 text-black text-[10px] font-mono uppercase font-bold border border-transparent rounded-xl transition duration-300 cursor-pointer"
+                          >
+                            Add Tag
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Interactive Personal Notes container */}
+                      <div className="space-y-2 pt-4 border-t border-white/5 animate-fadeIn">
+                        <div className="flex justify-between items-center">
+                          <h4 className="text-[10px] font-mono uppercase font-bold text-[#00F5FF]">Personal Transaction Notes</h4>
+                          {editingNotes !== (selectedTransaction.notes || "") && (
+                            <button
+                              onClick={() => handleSaveTransactionNotes(selectedTransaction.id, editingNotes)}
+                              className="text-[9px] font-mono font-black text-black bg-cyan-400 border border-cyan-400 px-2 py-0.5 rounded-lg hover:bg-cyan-350 transition-all uppercase cursor-pointer"
+                            >
+                              Save Notes
+                            </button>
+                          )}
+                        </div>
+                        <textarea
+                          value={editingNotes}
+                          onChange={(e) => setEditingNotes(e.target.value)}
+                          placeholder="Type custom thoughts, receipts tags, or descriptions here..."
+                          rows={3}
+                          className="w-full bg-black border border-white/5 rounded-2xl px-4 py-3 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400/50 transition-all leading-relaxed"
+                        />
+                      </div>
                     </div>
 
                     {/* Delete Posting controls and Actions */}
@@ -1019,6 +1183,22 @@ export default function App() {
                 </div>
               )}
             </AnimatePresence>
+
+            {/* Interactive global keyboard Command Palette & Help desk */}
+            <CommandPalette
+              isOpen={isCommandPaletteOpen}
+              setIsOpen={setIsCommandPaletteOpen}
+              isHelpOpen={isHelpOpen}
+              setIsHelpOpen={setIsHelpOpen}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              transactions={transactions}
+              onAddTransaction={handleAddTransaction}
+              syncTransactions={syncTransactions}
+              displayCurrency={displayCurrency}
+              userName={userName}
+              availableTags={availableTags}
+            />
 
             {/* MINI FOOTER CREDITS INFO */}
             <footer className="w-full bg-[#050505]/40 py-5 text-center border-t border-white/5 flex flex-col items-center justify-center gap-1 mt-auto">

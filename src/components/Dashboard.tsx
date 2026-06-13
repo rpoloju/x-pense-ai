@@ -171,7 +171,7 @@ export function Dashboard({
               {formatCurrencyValue(stats.balance, displayCurrency)}
             </div>
             <div className="flex items-center gap-1.5 text-xs text-white/40">
-              <span className={`flex items-center gap-0.5 font-semibold ${stats.balance >= 0 ? 'text-cyan-400' : 'text-rose-450'}`}>
+              <span className={`flex items-center gap-0.5 font-semibold ${stats.balance >= 0 ? 'text-cyan-400' : 'text-rose-400'}`}>
                 {stats.balance >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
                 {stats.income > 0 ? ((stats.balance / stats.income) * 100).toFixed(1) : 0}%
               </span>
@@ -216,7 +216,7 @@ export function Dashboard({
           <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-3xl group-hover:bg-cyan-500/10 transition-all duration-500" />
           <div className="flex justify-between items-start mb-4">
             <span className="text-xs font-mono font-semibold tracking-wider text-white/40 uppercase">Caps Balance Left</span>
-            <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 text-cyan-405 font-bold font-mono text-xs">
+            <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 text-cyan-400 font-bold font-mono text-xs">
               {displayCurrency}
             </div>
           </div>
@@ -239,7 +239,7 @@ export function Dashboard({
           <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-3xl group-hover:bg-cyan-500/10 transition-all duration-500" />
           <div className="flex justify-between items-start mb-4">
             <span className="text-xs font-mono font-semibold tracking-wider text-white/40 uppercase">Burn rate / Day</span>
-            <div className={`p-2.5 rounded-2xl bg-white/5 border border-white/10 ${stats.burnRateStatus === 'Aggressive' ? 'text-rose-450 animate-pulse' : 'text-cyan-400'}`}>
+            <div className={`p-2.5 rounded-2xl bg-white/5 border border-white/10 ${stats.burnRateStatus === 'Aggressive' ? 'text-rose-400 animate-pulse' : 'text-cyan-400'}`}>
               <Flame className="w-5 h-5" />
             </div>
           </div>
@@ -250,7 +250,7 @@ export function Dashboard({
             </div>
             <div className="flex items-center gap-1.5 text-xs animate-fadeIn">
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono leading-none tracking-wider font-bold ${
-                stats.burnRateStatus === "Excellent" ? "bg-cyan-500/20 text-cyan-455 border border-cyan-500/20" :
+                stats.burnRateStatus === "Excellent" ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/20" :
                 stats.burnRateStatus === "Nominal" ? "bg-blue-500/20 text-blue-400 border border-blue-500/20" :
                 "bg-rose-500/20 text-rose-400 border border-rose-500/20 animate-pulse"
               }`}>
@@ -267,12 +267,12 @@ export function Dashboard({
         <div className="p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-white/5 pb-3">
             <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-white/5 text-cyan-405">
+              <div className="p-1.5 rounded-lg bg-white/5 text-cyan-400">
                 <TrendingUp className="w-4.5 h-4.5" />
               </div>
               <span className="text-xs font-mono uppercase tracking-wider text-white/45">Monthly Accumulations</span>
             </div>
-            <span className="text-sm font-semibold font-mono text-cyan-405">+{formatCurrencyValue(stats.income, displayCurrency)}</span>
+            <span className="text-sm font-semibold font-mono text-cyan-400">+{formatCurrencyValue(stats.income, displayCurrency)}</span>
           </div>
           <div className="relative pt-1 font-mono">
             <div className="text-[10px] text-white/40 flex justify-between uppercase tracking-wider mb-1">
@@ -563,7 +563,7 @@ export function Dashboard({
                   </div>
 
                   <div className="text-right">
-                    <span className={`text-xs font-mono font-bold ${isExpense ? 'text-white/80' : 'text-cyan-405'}`}>
+                    <span className={`text-xs font-mono font-bold ${isExpense ? 'text-white/80' : 'text-cyan-400'}`}>
                       {isExpense ? "-" : "+"}
                       {formatCurrencyValue(tx.amount, tx.currency || "INR")}
                     </span>

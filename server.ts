@@ -157,25 +157,26 @@ app.post("/api/ai/chat", async (req, res) => {
       Speak natively in terms of the user's active display currency: ${displayCurrency}, translating budget indicators where relevant, and use localized currency symbols (like ₹ for INR, $ for USD, € for EUR, £ for GBP) in your replies. Avoid dry corporate jargon.
     `;
 
-    // Map messages back to Gemini API format: contents matches { parts: [{ text: ... }] } etc.
-    // Let's reformulate simple chat contents using standard chat model
-    const chatInstance = ai.chats.create({
-      model: "gemini-3.5-flash",
-      config: {
-        systemInstruction: systemContext
-      }
-    });
-
-    // Send the history except the last message, then send the last message
-    // Or simpler: formulate a structured generation request with the conversation history.
+    // Merge and alternate contents to ensure it starts with 'user' and alternates strictly
     const contents: any[] = [];
+    let expectedRole = "user"; // First message must be 'user'
     
     if (messages && Array.isArray(messages)) {
       for (const msg of messages) {
-        contents.push({
-          role: msg.role === "assistant" ? "model" : "user",
-          parts: [{ text: msg.content }]
-        });
+        const currentRole = msg.role === "assistant" ? "model" : "user";
+        if (currentRole === expectedRole) {
+          contents.push({
+            role: currentRole,
+            parts: [{ text: msg.content }]
+          });
+          expectedRole = expectedRole === "user" ? "model" : "user";
+        } else if (contents.length > 0) {
+          // Same role consecutively, append to the last message of the same role
+          const lastMsg = contents[contents.length - 1];
+          if (lastMsg.parts && lastMsg.parts[0] && msg.content) {
+            lastMsg.parts[0].text += "\n" + msg.content;
+          }
+        }
       }
     }
 

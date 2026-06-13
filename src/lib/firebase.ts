@@ -143,7 +143,8 @@ export async function backupTransactionsToCloud(userId: string, transactions: Tr
         date: tx.date,
         description: tx.description || "",
         isRecurring: !!tx.isRecurring,
-        currency: tx.currency || "INR"
+        currency: tx.currency || "INR",
+        notes: tx.notes || ""
       });
     });
 
@@ -173,7 +174,8 @@ export async function fetchTransactionsFromCloud(userId: string): Promise<Transa
         date: data.date,
         description: data.description || "",
         isRecurring: !!data.isRecurring,
-        currency: data.currency || "INR"
+        currency: data.currency || "INR",
+        notes: data.notes || ""
       });
     });
 
@@ -198,7 +200,8 @@ export async function syncSingleTransactionToCloud(userId: string, tx: Transacti
       date: tx.date,
       description: tx.description || "",
       isRecurring: !!tx.isRecurring,
-      currency: tx.currency || "INR"
+      currency: tx.currency || "INR",
+      notes: tx.notes || ""
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);

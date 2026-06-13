@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Transaction, ChatMessage, AISuggestions } from "../types";
 import { convertAmount, formatCurrencyValue } from "../utils/currencyUtils";
+import Markdown from "react-markdown";
 
 interface AIAdvisorProps {
   transactions: Transaction[];
@@ -191,7 +192,7 @@ export function AIAdvisor({ transactions, monthlyBudget, displayCurrency, exchan
             <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-start gap-3">
               <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
-                <h4 className="text-xs font-bold text-rose-450 uppercase tracking-wide font-sans">Report Connection Interrupted</h4>
+                <h4 className="text-xs font-bold text-rose-400 uppercase tracking-wide font-sans">Report Connection Interrupted</h4>
                 <p className="text-[11px] text-slate-300 leading-relaxed font-sans">{reportError}</p>
               </div>
             </div>
@@ -338,7 +339,28 @@ export function AIAdvisor({ transactions, monthlyBudget, displayCurrency, exchan
             </div>
           </div>
           
-          <span className="text-[10px] font-mono font-bold text-white/30 tracking-wider">CONTEXT ALIGNED</span>
+          <div className="flex items-center gap-3">
+            {messages.length > 1 && (
+              <button
+                onClick={() => {
+                  setMessages([
+                    {
+                      id: "welcome",
+                      role: "assistant",
+                      content: "Hello! I am Aura, your next-generation AI financial coach. I have indexed your accounts and transactions contextually. How can I help you adjust your budgets, analyze subscription leaks, or save more effectively today?",
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    }
+                  ]);
+                  setChatError("");
+                }}
+                className="px-2 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[9px] font-mono font-bold text-white/50 hover:text-white transition-all flex items-center gap-1.5 border border-white/5 cursor-pointer"
+                title="Reset conversation"
+              >
+                <RefreshCw className="w-3 h-3 text-cyan-400" /> RESET
+              </button>
+            )}
+            <span className="text-[10px] font-mono font-bold text-white/30 tracking-wider">CONTEXT ALIGNED</span>
+          </div>
         </div>
 
         {/* Message Log Grid */}
@@ -355,7 +377,13 @@ export function AIAdvisor({ transactions, monthlyBudget, displayCurrency, exchan
                     ? "bg-[#0c0c0c]/90 border border-white/5 text-white/90 rounded-tl-none font-sans" 
                     : "bg-white/10 text-white border border-white/5 rounded-tr-none font-sans shadow-md"
                 }`}>
-                  {msg.content}
+                  {isBot ? (
+                    <div className="prose prose-invert max-w-none text-white/90 leading-relaxed [&>table]:table-auto [&>table]:my-2 [&>table]:w-full [&>thead]:bg-white/5 [&>thead]:font-mono [&>th]:p-1.5 [&>th]:border-b [&>th]:border-white/10 [&>td]:p-1.5 [&>td]:border-b [&>td]:border-white/5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>h4]:font-sans [&>h4]:font-bold [&>p]:mb-1 [&>strong]:text-[#00F5FF] [&>strong]:font-bold">
+                      <Markdown>{msg.content}</Markdown>
+                    </div>
+                  ) : (
+                    msg.content
+                  )}
                 </div>
                 <span className="text-[9px] font-mono text-white/30 mt-1 uppercase font-bold">{msg.timestamp}</span>
               </div>

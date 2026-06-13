@@ -181,10 +181,17 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
   const [taxSalary, setTaxSalary] = useState(1200000);
   const [taxOther, setTaxOther] = useState(100000);
   const [taxIsSalaried, setTaxIsSalaried] = useState(true);
-  const [tax80C, setTax80C] = useState(150000);
-  const [tax80D, setTax80D] = useState(25000);
-  const [taxHomeLoanRent, setTaxHomeLoanRent] = useState(100000); // 80GG or Rent HRA Exemption / 24(b) Home loan
-  const [taxSection10, setTaxSection10] = useState(50000); // standard professional tax, LTA etc.
+  const [taxCorporateNps, setTaxCorporateNps] = useState(50000); // 80CCD(2) Corporate NPS (employer contribution)
+  const [taxFoodMealVal, setTaxFoodMealVal] = useState(26400); // Sodexo / Corporate food coupon value
+  const [taxEducationHostel, setTaxEducationHostel] = useState(9600); // children education / hostel
+  const [taxDutyAllowances, setTaxDutyAllowances] = useState(15000); // duty expenses under Sec 10(14)(i)
+  const [taxSpeciallyAbledTransport, setTaxSpeciallyAbledTransport] = useState(0); // Transport allowance for specially-abled
+  const [taxFamilyPension, setTaxFamilyPension] = useState(0); // Family Pension
+  const [taxGratuity, setTaxGratuity] = useState(0); // Retirement Gratuity
+  const [taxLeaveEncashment, setTaxLeaveEncashment] = useState(0); // Retirement Leave Encashment
+  const [taxVrsCompensation, setTaxVrsCompensation] = useState(0); // Voluntary Retirement Compensation
+  const [taxLetOutRent, setTaxLetOutRent] = useState(0); // Let-out house property gross rental
+  const [taxLetOutLoanInterest, setTaxLetOutLoanInterest] = useState(0); // Let-out house property home loan interest
 
   // --- CALCULATION LOGICS ---
 
@@ -588,15 +595,59 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
     };
   }, [ciPrincipal, ciMonthly, ciRate, ciYears, ciCompounding]);
 
-  // 9. Indian Income Tax Computations (Comparative Old vs New Regime - FY 2026-27 rules)
+  // 9. Indian Income Tax Computations (Wholesome New Tax Regime - FY 2026-27 rules)
   const taxResults = useMemo(() => {
-    // Total income
     const grossIncome = taxSalary + taxOther;
 
-    // --- NEW REGIME CALCS ---
-    // Standard deduction under New regime for FY 2026-27 remains Rs 75,000 for salaried
+    // --- WHOLOSOME NEW REGIME DEDUCTIONS & EXEMPTIONS ---
+    // 1. Standard Salaried Deduction: Rs 75,000 for FY 2025-26 & 2026-27
     const stdDeductionNew = taxIsSalaried ? 75000 : 0;
-    const taxableNew = Math.max(0, grossIncome - stdDeductionNew);
+
+    // 2. Corporate NPS under Sec 80CCD(2): Up to 14% of Basic + DA (Assume basic is 50% of the gross salary)
+    const maxNpsAllowed = taxIsSalaried ? Math.round(taxSalary * 0.5 * 0.14) : 0;
+    const npsDeduction = Math.min(taxCorporateNps, maxNpsAllowed);
+
+    // 3. Food/Meal Perquisite vouchers / Sodexo: Up to ₹26,400 annually (₹2,200/mo) under applicable corporate rules
+    const foodDeduction = Math.min(taxFoodMealVal, 26400);
+
+    // 4. Children Education & Hostel allowance under Section 10(14): up to ₹1,200 (edu) + ₹3,600 (hostel) per child for up to 2 children. Max ₹9,600
+    const educationDeduction = Math.min(taxEducationHostel, 9600);
+
+    // 5. Official Duty Allowances actually spent (Conveyance, Travel, Daily, Uniform) under Sec 10(14)(i)
+    const dutyAllowancesDeduction = taxDutyAllowances;
+
+    // 6. Transport Allowance for Specially-abled: Up to ₹38,400 per year (₹3,200/mo) under Sec 10(14)
+    const transportDeduction = Math.min(taxSpeciallyAbledTransport, 38400);
+
+    // 7. Family Pension standard deduction under Sec 57(iia): 1/3rd of the pension or ₹25,000, whichever is lower
+    const familyPensionDeduction = Math.min(taxFamilyPension * (1/3), 25000);
+
+    // 8. Gratuity Exemption under Sec 10(10): Up to ₹25,00,000 max
+    const gratuityDeduction = Math.min(taxGratuity, 2500000);
+
+    // 9. Leave Encashment on Retirement under Sec 10(10AA): Up to ₹25,00,000 max
+    const leaveEncashmentDeduction = Math.min(taxLeaveEncashment, 2500000);
+
+    // 10. VRS Retirement Compensation under Sec 10(10C): Up to ₹5,00,000 max
+    const vrsDeduction = Math.min(taxVrsCompensation, 500000);
+
+    // 11. Passive Let-out Property home loan interest net deduction under Section 24(b) (Losses cannot exceed rental income)
+    const housePropertyNetDeduction = Math.min(taxLetOutRent, taxLetOutLoanInterest);
+
+    const totalExemptions = 
+      stdDeductionNew + 
+      npsDeduction + 
+      foodDeduction + 
+      educationDeduction + 
+      dutyAllowancesDeduction + 
+      transportDeduction + 
+      familyPensionDeduction + 
+      gratuityDeduction + 
+      leaveEncashmentDeduction + 
+      vrsDeduction + 
+      housePropertyNetDeduction;
+
+    const taxableNew = Math.max(0, grossIncome - totalExemptions);
 
     // Calculate tax under New Regime slabs:
     // Up to 3,00,000 - Nil
@@ -617,7 +668,6 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
       { min: 1500000, max: Infinity, rate: 30 }
     ];
 
-    let tempNew = taxableNew;
     newSlabs.forEach(slab => {
       const range = slab.max - slab.min;
       if (taxableNew > slab.min) {
@@ -647,7 +697,6 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
       rebateNew = calculatedTaxNew;
     } else {
       // Marginal relief: tax liability cannot exceed the income exceeding ₹7 Lakhs.
-      // Net Income minus ₹7 Lakhs is the delta.
       const incomeExceeding7L = taxableNew - 700000;
       if (calculatedTaxNew > incomeExceeding7L) {
         rebateNew = calculatedTaxNew - incomeExceeding7L;
@@ -658,68 +707,6 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
     const cessNew = netTaxBeforeCessNew * 0.04;
     const finalTaxNew = netTaxBeforeCessNew + cessNew;
 
-
-    // --- OLD REGIME CALCS ---
-    // Deductions under Old regime: 80C (max 1.5L), 80D (max 75k overall here), Home loan Rent (limitless but let's deduct whatever is input), section 10 standard.
-    // Standard deduction inside old regime is 50,050 for salaried
-    const stdDeductionOld = taxIsSalaried ? 50000 : 0;
-    const deductionsTotal = Math.min(150000, tax80C) + Math.min(75000, tax80D) + taxHomeLoanRent + taxSection10 + stdDeductionOld;
-    const taxableOld = Math.max(0, grossIncome - deductionsTotal);
-
-    // Old Slabs:
-    // Up to 2,50,000 - Nil
-    // 2,50,001 - 5,00,000 - 5%
-    // 5,00,001 - 10,00,000 - 20%
-    // Above 10,00,000 - 30%
-    let calculatedTaxOld = 0;
-    const oldSlabBreakdowns: { slab: string; rate: number; taxableAmt: number; tax: number }[] = [];
-
-    const oldSlabs = [
-      { min: 0, max: 250000, rate: 0 },
-      { min: 250000, max: 500000, rate: 5 },
-      { min: 500000, max: 1000000, rate: 20 },
-      { min: 1000000, max: Infinity, rate: 30 }
-    ];
-
-    oldSlabs.forEach(slab => {
-      const range = slab.max - slab.min;
-      if (taxableOld > slab.min) {
-        const taxableInSlab = Math.min(range, taxableOld - slab.min);
-        const taxInSlab = (taxableInSlab * slab.rate) / 100;
-        calculatedTaxOld += taxInSlab;
-        oldSlabBreakdowns.push({
-          slab: slab.max === Infinity ? `Above ₹${slab.min.toLocaleString("en-IN")}` : `₹${slab.min.toLocaleString("en-IN")} - ₹${slab.max.toLocaleString("en-IN")}`,
-          rate: slab.rate,
-          taxableAmt: taxableInSlab,
-          tax: taxInSlab
-        });
-      } else {
-        oldSlabBreakdowns.push({
-          slab: slab.max === Infinity ? `Above ₹${slab.min.toLocaleString("en-IN")}` : `₹${slab.min.toLocaleString("en-IN")} - ₹${slab.max.toLocaleString("en-IN")}`,
-          rate: slab.rate,
-          taxableAmt: 0,
-          tax: 0
-        });
-      }
-    });
-
-    // Rebate Section 87A Old Regime: Tax rebate up to ₹12,500 if taxable income <= 5,00,000
-    let rebateOld = 0;
-    if (taxableOld <= 500000) {
-      rebateOld = Math.min(calculatedTaxOld, 12500);
-    }
-
-    const netTaxBeforeCessOld = Math.max(0, calculatedTaxOld - rebateOld);
-    const cessOld = netTaxBeforeCessOld * 0.04;
-    const finalTaxOld = netTaxBeforeCessOld + cessOld;
-
-    const netSaved = Math.abs(finalTaxOld - finalTaxNew);
-    const recommendation = finalTaxNew < finalTaxOld 
-      ? `New Regime is hyper-optimal for you, preserving ₹${Math.round(netSaved).toLocaleString("en-IN")} in additional net liquidity!`
-      : finalTaxOld < finalTaxNew 
-        ? `Old Regime is more optimal by ₹${Math.round(netSaved).toLocaleString("en-IN")} because of your high combined standard tax deductions.`
-        : "Both tax regimes compute equivalent tax output.";
-
     return {
       grossIncome,
       taxableNew,
@@ -728,24 +715,43 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
       cessNew,
       finalTaxNew,
       newSlabBreakdowns,
-      deductionsTotal,
-      taxableOld,
-      calculatedTaxOld,
-      rebateOld,
-      cessOld,
-      finalTaxOld,
-      oldSlabBreakdowns,
-      netSaved,
-      recommendation
+      totalExemptions,
+      stdDeductionNew,
+      npsDeduction,
+      foodDeduction,
+      educationDeduction,
+      dutyAllowancesDeduction,
+      transportDeduction,
+      familyPensionDeduction,
+      gratuityDeduction,
+      leaveEncashmentDeduction,
+      vrsDeduction,
+      housePropertyNetDeduction,
+      maxNpsAllowed
     };
-  }, [taxSalary, taxOther, taxIsSalaried, tax80C, tax80D, taxHomeLoanRent, taxSection10]);
+  }, [
+    taxSalary, 
+    taxOther, 
+    taxIsSalaried, 
+    taxCorporateNps, 
+    taxFoodMealVal, 
+    taxEducationHostel, 
+    taxDutyAllowances, 
+    taxSpeciallyAbledTransport, 
+    taxFamilyPension, 
+    taxGratuity, 
+    taxLeaveEncashment, 
+    taxVrsCompensation, 
+    taxLetOutRent, 
+    taxLetOutLoanInterest
+  ]);
 
   // Layout animations helper
   const rightColumnAnimation = {
     initial: { opacity: 0, y: 15, filter: "blur(2px)" },
     animate: { opacity: 1, y: 0, filter: "blur(0)" },
     exit: { opacity: 0, y: -15, filter: "blur(2px)" },
-    transition: { duration: 0.25, ease: "easeOut" }
+    transition: { duration: 0.25, ease: "easeOut" as const }
   };
 
   return (
@@ -802,7 +808,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
           <select
             value={activeCalc}
             onChange={(e) => setActiveCalc(e.target.value as CalculatorType)}
-            className="w-full bg-[#0c0c0c] border border-white/10 rounded-2xl px-4 py-3.5 text-xs text-cyan-455 font-mono focus:outline-none focus:border-[#00F5FF]/30 cursor-pointer"
+            className="w-full bg-[#0c0c0c] border border-white/10 rounded-2xl px-4 py-3.5 text-xs text-cyan-400 font-mono focus:outline-none focus:border-[#00F5FF]/30 cursor-pointer"
           >
             {calculators.map((calc) => (
               <option key={calc.id} value={calc.id} className="bg-black text-white">{calc.label}</option>
@@ -920,7 +926,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
 
                   <div className="p-5 bg-white/[0.02] border border-white/5 rounded-3xl space-y-1">
                     <span className="text-[9px] font-mono text-white/40 block uppercase font-bold leading-none">ESTIMATED DEFICIT</span>
-                    <span className="text-xl font-bold font-mono text-rose-450 block">{formatCurrencyValue(fireResults.deficitAtRetirement, displayCurrency)}</span>
+                    <span className="text-xl font-bold font-mono text-rose-400 block">{formatCurrencyValue(fireResults.deficitAtRetirement, displayCurrency)}</span>
                     <span className="text-[9.5px] text-white/30 block leading-tight">Shortfall after current savings grow at {firePreReturn}% for {fireResults.yearsToRetire} years</span>
                   </div>
 
@@ -991,10 +997,10 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                 {/* Projections Table Detail */}
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <div className="flex items-center gap-2 mb-3">
-                    <Table className="w-4 h-4 text-cyan-455" />
+                    <Table className="w-4 h-4 text-cyan-400" />
                     <span className="text-[10px] font-mono text-white/40 font-bold uppercase tracking-wider">ANNUAL HORIZON PROJECTIONS LEDGER</span>
                   </div>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar border border-white/5 rounded-xl">
+                  <div className="max-h-60 overflow-y-auto overflow-x-auto w-full custom-scrollbar border border-white/5 rounded-xl">
                     <table className="w-full text-left border-collapse font-mono text-[11px]">
                       <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9.5px]">
                         <tr>
@@ -1083,10 +1089,10 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                 {/* Detailed Table */}
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <div className="flex items-center gap-2 mb-3">
-                    <Table className="w-4 h-4 text-cyan-455" />
+                    <Table className="w-4 h-4 text-cyan-400" />
                     <span className="text-[10px] font-mono text-white/40 font-bold uppercase tracking-wider">YEAR-BY-YEAR ACCUMULATION TRAJECTORY</span>
                   </div>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar border border-white/5 rounded-xl">
+                  <div className="max-h-60 overflow-y-auto overflow-x-auto w-full custom-scrollbar border border-white/5 rounded-xl">
                     <table className="w-full text-left border-collapse font-mono text-[11px]">
                       <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9.5px]">
                         <tr>
@@ -1182,10 +1188,10 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                 {/* Table */}
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <div className="flex items-center gap-2 mb-3">
-                    <Table className="w-4 h-4 text-cyan-455" />
+                    <Table className="w-4 h-4 text-cyan-400" />
                     <span className="text-[10px] font-mono text-white/40 font-bold uppercase tracking-wider">STEPPED ACCUMULATIONS LEDGER</span>
                   </div>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar border border-white/5 rounded-xl">
+                  <div className="max-h-60 overflow-y-auto overflow-x-auto w-full custom-scrollbar border border-white/5 rounded-xl">
                     <table className="w-full text-left border-collapse font-mono text-[11px]">
                       <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9.5px]">
                         <tr>
@@ -1220,7 +1226,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                       <span className="text-[9px] font-mono text-[#00F5FF] font-bold uppercase tracking-widest">Reserve Depletions</span>
                       <h3 className="text-lg font-sans font-extrabold text-white leading-tight">Systematic Withdrawal Plan (SWP)</h3>
                     </div>
-                    <TrendingDown className="w-5 h-5 text-rose-450 animate-pulse" />
+                    <TrendingDown className="w-5 h-5 text-rose-400 animate-pulse" />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1276,7 +1282,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                   </div>
                   <div className="p-5 bg-white/[0.02] border border-white/5 rounded-3xl text-left">
                     <span className="text-[9px] font-mono text-white/40 block">Status</span>
-                    <span className={`text-xs font-sans font-bold uppercase mt-1.5 block ${swpResults.endingBalance > 0 ? "text-emerald-400" : "text-rose-450"}`}>
+                    <span className={`text-xs font-sans font-bold uppercase mt-1.5 block ${swpResults.endingBalance > 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       {swpResults.endingBalance > 0 ? "✅ Sustainable Horizon" : "⚠️ Capital Depleted Early"}
                     </span>
                   </div>
@@ -1285,7 +1291,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                 {/* Table */}
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <span className="text-[9px] font-mono text-white/40 font-bold uppercase tracking-wider block mb-3">ANNUAL WITHDRAWAL RUNTIME LEDGER</span>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar border border-white/5 rounded-xl">
+                  <div className="max-h-60 overflow-y-auto overflow-x-auto w-full custom-scrollbar border border-white/5 rounded-xl">
                     <table className="w-full text-left border-collapse font-mono text-[11px]">
                       <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9.5px]">
                         <tr>
@@ -1390,7 +1396,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                   </div>
                   <div className="p-5 bg-white/[0.02] border border-white/5 rounded-3xl text-left">
                     <span className="text-[9px] font-mono text-white/40 block">Forecast</span>
-                    <span className={`text-xs font-sans font-bold uppercase mt-1.5 block ${swpInflResults.endingBalance > 0 ? "text-emerald-400" : "text-rose-450"}`}>
+                    <span className={`text-xs font-sans font-bold uppercase mt-1.5 block ${swpInflResults.endingBalance > 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       {swpInflResults.endingBalance > 0 ? "✅ Inflation Resilient" : "⚠️ Out of Capital Early"}
                     </span>
                   </div>
@@ -1399,7 +1405,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                 {/* Table */}
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <span className="text-[9px] font-mono text-white/40 font-bold uppercase tracking-wider block mb-3">ADAPTIVE INFLATED WITHDRAWALS RUNTIME LEDGER</span>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar border border-white/5 rounded-xl">
+                  <div className="max-h-60 overflow-y-auto overflow-x-auto w-full custom-scrollbar border border-white/5 rounded-xl">
                     <table className="w-full text-left border-collapse font-mono text-[11px]">
                       <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9.5px]">
                         <tr>
@@ -1498,7 +1504,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                 {/* Table */}
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <span className="text-[9px] font-mono text-white/40 font-bold uppercase tracking-wider block mb-3">GUARANTEED ACCRUAL STEPS</span>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar border border-white/5 rounded-xl">
+                  <div className="max-h-60 overflow-y-auto overflow-x-auto w-full custom-scrollbar border border-white/5 rounded-xl">
                     <table className="w-full text-left border-collapse font-mono text-[11px]">
                       <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9.5px]">
                         <tr>
@@ -1585,7 +1591,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                 {/* Table */}
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <span className="text-[10px] font-mono text-white/40 font-bold uppercase tracking-wider block mb-3">ANNUAL RETIREMENT SAVING INTERVALS</span>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar border border-white/5 rounded-xl">
+                  <div className="max-h-60 overflow-y-auto overflow-x-auto w-full custom-scrollbar border border-white/5 rounded-xl">
                     <table className="w-full text-left border-collapse font-mono text-[11px]">
                       <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9.5px]">
                         <tr>
@@ -1697,7 +1703,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                 {/* Table */}
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <span className="text-[10px] font-mono text-white/40 font-bold uppercase tracking-wider block mb-3">ANNUAL ACCUMULATING STEPS LEDGER</span>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar border border-white/5 rounded-xl">
+                  <div className="max-h-60 overflow-y-auto overflow-x-auto w-full custom-scrollbar border border-white/5 rounded-xl">
                     <table className="w-full text-left border-collapse font-mono text-[11px]">
                       <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9.5px]">
                         <tr>
@@ -1725,21 +1731,22 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
               </div>
             )}
 
-            {/* 9. INDIAN INCOME TAX COMPARATIVE CALCULATOR */}
+            {/* 9. WHOLOSOME INDIAN NEW TAX REGIME CALCULATOR */}
             {activeCalc === "tax" && (
               <div className="space-y-6">
                 <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
                   <div className="flex justify-between items-start border-b border-white/5 pb-4 mb-5">
                     <div>
-                      <span className="text-[9px] font-mono text-amber-400 font-bold uppercase tracking-widest">Fiscal Slabs Code</span>
-                      <h3 className="text-lg font-sans font-extrabold text-white leading-tight">Indian Income Tax Comparator (FY 2026-27 / 2025-26)</h3>
+                      <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase tracking-widest">FY 2025-26 & FY 2026-27</span>
+                      <h3 className="text-lg font-sans font-extrabold text-white leading-tight">Wholesome New Tax Regime Engine</h3>
                     </div>
                     <Scale className="w-5 h-5 text-[#00F5FF]" />
                   </div>
 
+                  {/* Primaries */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <CompactInput
-                      label="Annual Gross Salary / Profit"
+                      label="Annual Gross Salary / Professional Profit"
                       value={taxSalary}
                       onChange={setTaxSalary}
                       prefix="₹"
@@ -1748,7 +1755,7 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     />
 
                     <CompactInput
-                      label="Other Income (Rent, Interest, CapGains)"
+                      label="Other Income (Rent, Interest, Capital Gains)"
                       value={taxOther}
                       onChange={setTaxOther}
                       prefix="₹"
@@ -1756,164 +1763,299 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                       currencyCode="INR"
                     />
 
-                    <div className="sm:col-span-2 flex items-center gap-3 bg-white/[0.02] p-3.5 rounded-2xl border border-white/5 mt-1">
+                    <div className="sm:col-span-2 flex items-center gap-3 bg-white/[0.012] p-3.5 rounded-2xl border border-white/5">
                       <input 
-                        type="checkbox" checked={taxIsSalaried} id="taxIsSalaried"
+                        type="checkbox" 
+                        checked={taxIsSalaried} 
+                        id="taxIsSalaried"
                         onChange={(e) => setTaxIsSalaried(e.target.checked)}
-                        className="w-4.5 h-4.5 rounded-lg accent-[#00F5FF] cursor-pointer"
+                        className="w-4.5 h-4.5 rounded-md accent-[#00F5FF] cursor-pointer"
                       />
                       <label htmlFor="taxIsSalaried" className="text-xs font-sans text-white/80 cursor-pointer select-none">
-                        Is Salaried Individual? (Enables standard deductions of ₹75,000 for New Regime, ₹50,000 for Old Regime)
+                        Is Salaried Individual / Pensioner? (Enables automatic standard deduction of <span className="text-emerald-400 font-bold">₹75,000</span>)
                       </label>
                     </div>
+                  </div>
 
-                    {/* Old Regime settings */}
-                    <div className="sm:col-span-2 border-t border-white/5 pt-4 mt-2">
-                      <span className="text-[10px] font-mono text-white/40 block font-bold uppercase tracking-wider mb-3">EXEMPTIONS & DEDUCTIONS FOR OLD REGIME SENSITIVITY</span>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Subsection A: Corporate & Salaried Perks */}
+                  <div className="border-t border-white/5 pt-5 mt-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="w-1.5 h-3 bg-cyan-400 rounded-full" />
+                      <span className="text-[10px] font-mono text-white/60 block font-bold uppercase tracking-wider">Corporate Allowances & Perks (Exempt)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
                         <CompactInput
-                          label="Sec 80C Deductions (ELSS/PPF/LIC)"
-                          value={tax80C}
-                          onChange={(val) => setTax80C(Math.min(150000, val))}
-                          prefix="₹"
-                          isCurrency={true}
-                          currencyCode="INR"
-                          suffix="(Max 1.5L)"
-                        />
-
-                        <CompactInput
-                          label="Sec 80D (Health Premium)"
-                          value={tax80D}
-                          onChange={(val) => setTax80D(Math.min(75000, val))}
-                          prefix="₹"
-                          isCurrency={true}
-                          currencyCode="INR"
-                          suffix="(Max 75k)"
-                        />
-
-                        <CompactInput
-                          label="Sec 24b / Rent HRA Exemption"
-                          value={taxHomeLoanRent}
-                          onChange={setTaxHomeLoanRent}
+                          label="Employer NPS Contribution (Sec 80CCD(2))"
+                          value={taxCorporateNps}
+                          onChange={setTaxCorporateNps}
                           prefix="₹"
                           isCurrency={true}
                           currencyCode="INR"
                         />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Capped at 14% of Basic + DA (approx. ₹{taxResults.maxNpsAllowed.toLocaleString("en-IN")} max based on your Salary)
+                        </span>
+                      </div>
 
+                      <div>
                         <CompactInput
-                          label="Other exemptions / Sec 10"
-                          value={taxSection10}
-                          onChange={setTaxSection10}
+                          label="Corporate Meal Cards / Food Coupons (Sodexo)"
+                          value={taxFoodMealVal}
+                          onChange={setTaxFoodMealVal}
                           prefix="₹"
                           isCurrency={true}
                           currencyCode="INR"
                         />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Exempt up to Rs 50/meal (capped at ₹26,400 max yearly)
+                        </span>
+                      </div>
+
+                      <div>
+                        <CompactInput
+                          label="Children Education & Hostel Allowance"
+                          value={taxEducationHostel}
+                          onChange={setTaxEducationHostel}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Rs 100/mo edu + Rs 300/mo hostel, up to 2 children (max ₹9,600)
+                        </span>
+                      </div>
+
+                      <div>
+                        <CompactInput
+                          label="Official Duty Allowances (Actual Spent)"
+                          value={taxDutyAllowances}
+                          onChange={setTaxDutyAllowances}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Reimbursement spent on Conveyance, Uniform, Travel for duty (Sec 10(14)(i))
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Subsection B: Retirement & Retirals (Exempt) */}
+                  <div className="border-t border-white/5 pt-5 mt-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="w-1.5 h-3 bg-purple-400 rounded-full" />
+                      <span className="text-[10px] font-mono text-white/60 block font-bold uppercase tracking-wider">Retirement & Voluntary Resignation (Exempt)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <CompactInput
+                          label="Gratuity Payout Received"
+                          value={taxGratuity}
+                          onChange={setTaxGratuity}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Tax-exempt up to ₹25,00,000 max
+                        </span>
+                      </div>
+
+                      <div>
+                        <CompactInput
+                          label="Retirement Leave Encashment"
+                          value={taxLeaveEncashment}
+                          onChange={setTaxLeaveEncashment}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Tax-exempt up to ₹25,00,000 max
+                        </span>
+                      </div>
+
+                      <div>
+                        <CompactInput
+                          label="VRS Scheme Compensation"
+                          value={taxVrsCompensation}
+                          onChange={setTaxVrsCompensation}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Tax-exempt up to ₹5,00,000 max under 10(10C)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Subsection C: Landlord Let-out Properties & Home Loans */}
+                  <div className="border-t border-white/5 pt-5 mt-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="w-1.5 h-3 bg-amber-400 rounded-full" />
+                      <span className="text-[10px] font-mono text-white/60 block font-bold uppercase tracking-wider">House Property (Let-Out Tenant Home Loans)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <CompactInput
+                          label="Gross Rental Income (Tenant Rent received)"
+                          value={taxLetOutRent}
+                          onChange={setTaxLetOutRent}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Declare gross yearly rent coming from passive letting
+                        </span>
+                      </div>
+
+                      <div>
+                        <CompactInput
+                          label="Interest paid on Home Loan for let-out property"
+                          value={taxLetOutLoanInterest}
+                          onChange={setTaxLetOutLoanInterest}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Under New Regime, deduction is bounded up to the rental income yield
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Subsection D: Special Circumstances */}
+                  <div className="border-t border-white/5 pt-5 mt-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="w-1.5 h-3 bg-pink-400 rounded-full" />
+                      <span className="text-[10px] font-mono text-white/60 block font-bold uppercase tracking-wider">Special Allowances & Pensioners</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <CompactInput
+                          label="Transport Allowance (Specially-Abled Individuals)"
+                          value={taxSpeciallyAbledTransport}
+                          onChange={setTaxSpeciallyAbledTransport}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Exempt up to ₹3,200/month (capped at ₹38,400 max)
+                        </span>
+                      </div>
+
+                      <div>
+                        <CompactInput
+                          label="Family Pension Received"
+                          value={taxFamilyPension}
+                          onChange={setTaxFamilyPension}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
+                        <span className="text-[9px] font-mono text-white/35 mt-1 block px-1">
+                          Enables standard deduction of 1/3rd of pension up to ₹25,000 max
+                        </span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Compare Outputs */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Main Results Dashboard */}
+                <div className="p-6 bg-[#00F5FF]/5 border border-[#00F5FF]/15 rounded-3xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-36 h-36 bg-[#00F5FF]/10 rounded-full blur-3xl pointer-events-none" />
+                  <span className="text-[10px] font-mono text-white/40 block font-bold uppercase tracking-wider mb-4 border-b border-white/5 pb-2">New Regime Tax computation Statement</span>
                   
-                  {/* New Regime Card */}
-                  <div className="p-6 bg-[#00F5FF]/5 border border-[#00F5FF]/10 rounded-3xl relative overflow-hidden">
-                    <span className="absolute top-3 right-3 text-[9px] font-mono font-bold bg-[#00F5FF]/10 px-2 py-0.5 rounded text-[#00F5FF]">RECOMMENDED REGIME</span>
-                    <span className="text-[10px] font-mono text-white/50 block font-bold uppercase tracking-wider mb-2">NEW TAX REGIME (FY 2026-27 Standard)</span>
-                    <div className="space-y-2 font-mono">
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Taxable Income:</span>
-                        <span>₹{taxResults.taxableNew.toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Calculated Tax:</span>
-                        <span>₹{Math.round(taxResults.calculatedTaxNew).toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Sec 87A Rebate:</span>
-                        <span className="text-emerald-400">-₹{Math.round(taxResults.rebateNew).toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Health & Education Cess (4%):</span>
-                        <span>₹{Math.round(taxResults.cessNew).toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="border-t border-white/10 pt-2 flex justify-between text-sm font-bold text-[#00F5FF]">
-                        <span>Net Tax Payable:</span>
-                        <span>₹{Math.round(taxResults.finalTaxNew).toLocaleString("en-IN")}</span>
-                      </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 font-mono text-xs text-white/70">
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-white/40 font-bold block uppercase leading-none">Gross Combined Income</span>
+                      <span className="text-lg font-bold text-white block">₹{taxResults.grossIncome.toLocaleString("en-IN")}</span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-emerald-400/80 font-bold block uppercase leading-none">Claimed & Approved Exemptions</span>
+                      <span className="text-lg font-bold text-emerald-400 block">- ₹{taxResults.totalExemptions.toLocaleString("en-IN")}</span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-[#00F5FF]/80 font-bold block uppercase leading-none">Net Taxable Income</span>
+                      <span className="text-lg font-bold text-[#00F5FF] block">₹{taxResults.taxableNew.toLocaleString("en-IN")}</span>
                     </div>
                   </div>
 
-                  {/* Old Regime Card */}
-                  <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
-                    <span className="text-[10px] font-mono text-white/50 block font-bold uppercase tracking-wider mb-2">OLD TAX REGIME (Optional)</span>
-                    <div className="space-y-2 font-mono">
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Deductions Allowed:</span>
-                        <span className="text-cyan-450">₹{taxResults.deductionsTotal.toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Taxable Income:</span>
-                        <span>₹{taxResults.taxableOld.toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Calculated Tax:</span>
-                        <span>₹{Math.round(taxResults.calculatedTaxOld).toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Sec 87A Rebate:</span>
-                        <span className="text-emerald-400">-₹{Math.round(taxResults.rebateOld).toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span>Health & Education Cess (4%):</span>
-                        <span>₹{Math.round(taxResults.cessOld).toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="border-t border-white/10 pt-2 flex justify-between text-sm font-bold text-white">
-                        <span>Net Tax Payable:</span>
-                        <span>₹{Math.round(taxResults.finalTaxOld).toLocaleString("en-IN")}</span>
-                      </div>
+                  <div className="border-t border-white/5 mt-5 pt-4 space-y-2.5 font-mono text-xs">
+                    <div className="flex justify-between items-center text-white/60">
+                      <span>Calculated progressive Base Tax:</span>
+                      <span>₹{Math.round(taxResults.calculatedTaxNew).toLocaleString("en-IN")}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-emerald-400 font-bold">
+                      <span>Section 87A Tax Rebate / Marginal Relief:</span>
+                      <span>- ₹{Math.round(taxResults.rebateNew).toLocaleString("en-IN")}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-white/60">
+                      <span>Health & Education Cess (4%):</span>
+                      <span>₹{Math.round(taxResults.cessNew).toLocaleString("en-IN")}</span>
+                    </div>
+
+                    <div className="border-t border-white/10 pt-3.5 flex justify-between items-center text-md font-extrabold text-[#00F5FF]">
+                      <span className="tracking-tight uppercase">Net Fiscal Tax Liability:</span>
+                      <span className="text-xl">₹{Math.round(taxResults.finalTaxNew).toLocaleString("en-IN")}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Comparative assessment report alert */}
-                <div className="p-5 bg-white/[0.02] border border-white/5 rounded-3xl flex gap-3.5 items-start">
-                  <Info className="w-5 h-5 text-cyan-450 shrink-0 mt-0.5" />
+                {/* Visual progression bar for each slab */}
+                <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl space-y-4">
+                  <span className="text-[9.5px] font-mono text-white/40 font-bold uppercase tracking-wider block">Income Distribution across New Regime Slabs</span>
+                  <div className="space-y-3 font-mono text-[10px]">
+                    {taxResults.newSlabBreakdowns.map((val, idx) => {
+                      const percentage = val.taxableAmt > 0 
+                        ? Math.min(100, Math.round((val.taxableAmt / (idx === 5 ? 500000 : (idx === 1 ? 400000 : (idx === 3 || idx === 4 ? 200000 : 300000)))) * 100))
+                        : 0;
+                      return (
+                        <div key={idx} className="space-y-1">
+                          <div className="flex justify-between text-white/50">
+                            <span className="font-bold text-white/70">{val.slab} (Rate: {val.rate}%)</span>
+                            <span>Slab Tax: <span className={val.tax > 0 ? "text-cyan-400 font-bold" : "text-white/30"}>₹{Math.round(val.tax).toLocaleString("en-IN")}</span></span>
+                          </div>
+                          <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden relative border border-white/[0.03]">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${percentage}%` }}
+                              transition={{ duration: 0.5, delay: idx * 0.05 }}
+                              className={`h-full rounded-full ${val.rate === 0 ? "bg-white/10" : "bg-[#00F5FF]"}`}
+                            />
+                          </div>
+                          <div className="flex justify-between text-[8.5px] text-white/35">
+                            <span>Income in slab: ₹{Math.round(val.taxableAmt).toLocaleString("en-IN")}</span>
+                            <span>{percentage}% filled</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Informative advice info block */}
+                <div className="p-5 bg-white/[0.012] border border-white/5 rounded-3xl flex gap-3.5 items-start">
+                  <Info className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
                   <div className="space-y-1">
-                    <span className="text-[10px] font-mono text-white/40 block font-black uppercase">Regime Recommendation Report</span>
+                    <span className="text-[10px] font-mono text-white/40 block font-black uppercase">Statutory Tax Code Notes</span>
                     <p className="text-xs text-white/80 leading-relaxed font-sans font-semibold">
-                      {taxResults.recommendation}
+                      Your net taxable income is derived by deducting all selected legal exemptions totaling <span className="text-emerald-400">₹{taxResults.totalExemptions.toLocaleString("en-IN")}</span> from gross salaries and ancillary incomes.
                     </p>
-                    <p className="text-[10px] text-white/40 font-sans leading-tight">
-                      * Rebate of ₹20,000 applies up to ₹7,00,000 taxable salary under New Tax Regime.
+                    <p className="text-[10px] text-white/35 font-sans leading-tight mt-1">
+                      * Under standard Sec 87A, complete 100% tax rebate applies if net taxable income is under ₹7,00,000. Marginal relief is computed standardly for income slightly over ₹7 Lakhs.
                     </p>
-                  </div>
-                </div>
-
-                {/* Slabs breakdown details */}
-                <div className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl">
-                  <span className="text-[9.5px] font-mono text-white/40 font-bold uppercase tracking-wider block mb-3">NEW REGIME EXCISE TAX SLABS DETAILS</span>
-                  <div className="overflow-x-auto custom-scrollbar">
-                    <table className="w-full text-left border-collapse font-mono text-[11px]">
-                      <thead className="bg-[#0c0c0c] text-white/45 sticky top-0 uppercase text-[9px]">
-                        <tr>
-                          <th className="p-3">Income Range</th>
-                          <th className="p-3">Slab Rate %</th>
-                          <th className="p-3">Taxable Value in Slab</th>
-                          <th className="p-3 text-right">Tax Liability</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/5 bg-black/10">
-                        {taxResults.newSlabBreakdowns.map((val, idx) => (
-                          <tr key={idx} className="hover:bg-white/[0.015]">
-                            <td className="p-3 text-white font-bold">{val.slab}</td>
-                            <td className="p-3 text-[#00F5FF]">{val.rate}%</td>
-                            <td className="p-3 text-white/60">₹{Math.round(val.taxableAmt).toLocaleString("en-IN")}</td>
-                            <td className="p-3 text-right font-bold text-white">₹{Math.round(val.tax).toLocaleString("en-IN")}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
                   </div>
                 </div>
               </div>

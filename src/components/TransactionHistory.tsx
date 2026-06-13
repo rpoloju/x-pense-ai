@@ -16,12 +16,16 @@ import {
   Filter,
   Check,
   Download,
-  Upload
+  Upload,
+  Settings2,
+  Wand2,
+  RefreshCw
 } from "lucide-react";
-import { Transaction, TransactionType } from "../types";
+import { Transaction, TransactionType, CategorizationRule } from "../types";
 import { CATEGORIES } from "../data";
 import { CategoryIcon } from "./CategoryIcon";
 import { CURRENCIES, convertAmount, formatCurrencyValue } from "../utils/currencyUtils";
+import { exportToExcelWithCharts } from "../utils/excelExporter";
 
 interface TransactionHistoryProps {
   transactions: Transaction[];
@@ -31,6 +35,10 @@ interface TransactionHistoryProps {
   onDeleteTransaction: (id: string) => void;
   onSelectTransaction: (tx: Transaction) => void;
   onImportTransactions: (imported: Omit<Transaction, "id">[]) => void;
+  availableTags: string[];
+  onAddCustomTag: (tag: string) => void;
+  onDeleteCustomTag: (tag: string) => void;
+  onSyncTransactions?: (updated: Transaction[]) => void;
 }
 
 export function TransactionHistory({ 
@@ -40,7 +48,11 @@ export function TransactionHistory({
   onAddTransaction, 
   onDeleteTransaction,
   onSelectTransaction,
-  onImportTransactions
+  onImportTransactions,
+  availableTags,
+  onAddCustomTag,
+  onDeleteCustomTag,
+  onSyncTransactions
 }: TransactionHistoryProps) {
   // Filters & State
   const [searchQuery, setSearchQuery] = useState("");
@@ -48,6 +60,36 @@ export function TransactionHistory({
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"date-desc" | "date-asc" | "amount-desc" | "amount-asc">("date-desc");
   const [isAddingModalOpen, setIsAddingModalOpen] = useState(false);
+
+  // --- Cosmic Ledger Productivity States (Multiselect, Custom Rules, CSV Sandbox) ---
+  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
+  const [showRulesModal, setShowRulesModal] = useState(false);
+  const [rules, setRules] = useState<CategorizationRule[]>(() => {
+    try {
+      const stored = localStorage.getItem("aura_categorization_rules");
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    const seedRules: CategorizationRule[] = [
+      { id: "rule-1", keyword: "AWS", category: "Housing & Rent", type: "expense", tags: ["Business"], isActive: true },
+      { id: "rule-2", keyword: "Netflix", category: "Entertainment", type: "expense", tags: ["Subscription"], isActive: true },
+      { id: "rule-3", keyword: "Uber", category: "Transportation", type: "expense", tags: ["Leisure"], isActive: true },
+      { id: "rule-4", keyword: "Salary", category: "Income", type: "income", tags: [], isActive: true },
+      { id: "rule-5", keyword: "Amazon", category: "Shopping", type: "expense", tags: [], isActive: true },
+      { id: "rule-6", keyword: "Starbucks", category: "Food & Dining", type: "expense", tags: [], isActive: true }
+    ];
+    localStorage.setItem("aura_categorization_rules", JSON.stringify(seedRules));
+    return seedRules;
+  });
+  
+  const [newRuleKeyword, setNewRuleKeyword] = useState("");
+  const [newRuleCategory, setNewRuleCategory] = useState("Food & Dining");
+  const [newRuleType, setNewRuleType] = useState<TransactionType>("expense");
+  const [newRuleTagInput, setNewRuleTagInput] = useState("");
+
+  const [sandboxTransactions, setSandboxTransactions] = useState<Omit<Transaction, "id">[] | null>(null);
+  const [sandboxCheckedIndices, setSandboxCheckedIndices] = useState<number[]>([]);
+  const [sandboxBulkCategory, setSandboxBulkCategory] = useState("");
+  // --- End Cosmic Ledger Productivity States ---
 
   // Date window state definitions
   const [dateWindow, setDateWindow] = useState<"all" | "this-month" | "last-month" | "30-days" | "90-days" | "custom">("all");
@@ -59,6 +101,22 @@ export function TransactionHistory({
   const [importNotice, setImportNotice] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  const [selectedTagsFilter, setSelectedTagsFilter] = useState<string[]>([]);
+  const [newTagInput, setNewTagInput] = useState("");
+
+  // Create unique list of tags across all transactions (plus high-utility defaults)
+  const allUniqueTags = useMemo(() => {
+    const tagsSet = new Set<string>(availableTags);
+    transactions.forEach(t => {
+      if (t.tags) {
+        t.tags.forEach(tag => {
+          if (tag.trim()) tagsSet.add(tag.trim());
+        });
+      }
+    });
+    return Array.from(tagsSet).sort();
+  }, [transactions, availableTags]);
+
   // Form State
   const [formData, setFormData] = useState({
     title: "",
@@ -68,7 +126,9 @@ export function TransactionHistory({
     date: new Date().toISOString().split("T")[0],
     description: "",
     isRecurring: false,
-    currency: displayCurrency
+    currency: displayCurrency,
+    notes: "",
+    tags: [] as string[]
   });
   const [formError, setFormError] = useState("");
 
@@ -143,6 +203,7 @@ export function TransactionHistory({
       result = result.filter(tx => 
         tx.title.toLowerCase().includes(q) || 
         (tx.description && tx.description.toLowerCase().includes(q)) ||
+        (tx.notes && tx.notes.toLowerCase().includes(q)) ||
         tx.category.toLowerCase().includes(q)
       );
     }
@@ -155,6 +216,13 @@ export function TransactionHistory({
     // Category filter
     if (activeCategoryFilter !== "all") {
       result = result.filter(tx => tx.category === activeCategoryFilter);
+    }
+
+    // Tag filtering (items matching any or all selected tags; we'll require all selected tags for precise narrowing, which is very helpful!)
+    if (selectedTagsFilter.length > 0) {
+      result = result.filter(tx => 
+        selectedTagsFilter.every(tag => tx.tags && tx.tags.includes(tag))
+      );
     }
 
     // Sorting
@@ -171,7 +239,7 @@ export function TransactionHistory({
     });
 
     return result;
-  }, [transactions, searchQuery, activeTypeFilter, activeCategoryFilter, sortBy, dateWindow, customStartDate, customEndDate]);
+  }, [transactions, searchQuery, activeTypeFilter, activeCategoryFilter, sortBy, dateWindow, customStartDate, customEndDate, selectedTagsFilter]);
 
   const stats = useMemo(() => {
     let totalIncome = 0;
@@ -185,6 +253,92 @@ export function TransactionHistory({
 
     return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
   }, [processedTransactions, displayCurrency, exchangeRates]);
+
+  // --- Smart Rules Engine Helpers ---
+  const applyRulesToTransaction = (title: string, currentCategory: string, type: TransactionType, currentTags?: string[]) => {
+    let resolvedCategory = currentCategory;
+    let resolvedTags = currentTags ? [...currentTags] : [];
+
+    const matchingRule = rules.find(r => r.isActive && r.type === type && title.toLowerCase().includes(r.keyword.toLowerCase()));
+    if (matchingRule) {
+      resolvedCategory = matchingRule.category;
+      if (matchingRule.tags) {
+        matchingRule.tags.forEach(t => {
+          if (!resolvedTags.includes(t)) resolvedTags.push(t);
+        });
+      }
+    }
+    return { category: resolvedCategory, tags: resolvedTags, wasMatched: !!matchingRule, matchedRule: matchingRule };
+  };
+
+  const runRulesRetroactively = () => {
+    if (!onSyncTransactions) {
+      alert("State synchronization error: Transaction history is not currently linked dynamically.");
+      return;
+    }
+
+    let modifiedCount = 0;
+    const updated = transactions.map(t => {
+      const match = applyRulesToTransaction(t.title, t.category, t.type, t.tags || []);
+      if (match.wasMatched && (match.category !== t.category || JSON.stringify(match.tags) !== JSON.stringify(t.tags || []))) {
+        modifiedCount++;
+      }
+      return {
+        ...t,
+        category: match.category,
+        tags: match.tags
+      };
+    });
+
+    if (modifiedCount === 0) {
+      alert("Retroactive sync completed: Every transaction is already fully aligned with active rule mappings.");
+      return;
+    }
+
+    onSyncTransactions(updated);
+    alert(`Retroactive sync complete! Verified ${transactions.length} total entries and auto-categorized ${modifiedCount} matched postings dynamically.`);
+  };
+
+  const handleAddRule = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRuleKeyword.trim()) return;
+
+    if (rules.some(r => r.keyword.toLowerCase() === newRuleKeyword.trim().toLowerCase() && r.type === newRuleType)) {
+      alert("An active automation rule already corresponds to this keyword payee trigger.");
+      return;
+    }
+
+    const tagsArr = newRuleTagInput.split(",").map(t => t.trim()).filter(t => t.length > 0);
+
+    const freshRule: CategorizationRule = {
+      id: `rule-${Date.now()}`,
+      keyword: newRuleKeyword.trim(),
+      category: newRuleCategory,
+      type: newRuleType,
+      tags: tagsArr,
+      isActive: true
+    };
+
+    const updated = [...rules, freshRule];
+    setRules(updated);
+    localStorage.setItem("aura_categorization_rules", JSON.stringify(updated));
+
+    setNewRuleKeyword("");
+    setNewRuleTagInput("");
+  };
+
+  const handleDeleteRule = (id: string) => {
+    const updated = rules.filter(r => r.id !== id);
+    setRules(updated);
+    localStorage.setItem("aura_categorization_rules", JSON.stringify(updated));
+  };
+
+  const handleToggleRule = (id: string) => {
+    const updated = rules.map(r => r.id === id ? { ...r, isActive: !r.isActive } : r);
+    setRules(updated);
+    localStorage.setItem("aura_categorization_rules", JSON.stringify(updated));
+  };
+  // --- End Smart Rules Helpers ---
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,15 +354,20 @@ export function TransactionHistory({
       return;
     }
 
+    // Apply auto-categorization matching rules automatically on manual entry!
+    const ruleMatch = applyRulesToTransaction(formData.title, formData.category, formData.type, formData.tags);
+
     onAddTransaction({
       title: formData.title,
       amount: amt,
       type: formData.type,
-      category: formData.category,
+      category: ruleMatch.category,
       date: formData.date,
       description: formData.description.trim() || undefined,
       isRecurring: formData.isRecurring,
-      currency: formData.currency
+      currency: formData.currency,
+      notes: formData.notes.trim() || undefined,
+      tags: ruleMatch.tags
     });
 
     // Reset Form
@@ -220,54 +379,27 @@ export function TransactionHistory({
       date: new Date().toISOString().split("T")[0],
       description: "",
       isRecurring: false,
-      currency: displayCurrency
+      currency: displayCurrency,
+      notes: "",
+      tags: [] as string[]
     });
     setIsAddingModalOpen(false);
   };
 
-  // Export processed transactions to CSV format
-  const handleExportCSV = () => {
+  // Export processed transactions to high-fidelity Excel Spreadsheet with Charts
+  const handleExportExcel = async () => {
     if (processedTransactions.length === 0) {
       alert("No transaction postings to export under the current chosen window.");
       return;
     }
 
-    // Escape CSV Fields helper
-    const escapeCSVField = (field: string | undefined | null) => {
-      if (field === undefined || field === null) return '""';
-      const str = String(field);
-      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
-
-    const headers = ["Title", "Amount", "Type", "Category", "Date", "Description", "IsRecurring", "Currency"];
-    const rows = processedTransactions.map(tx => [
-      escapeCSVField(tx.title),
-      tx.amount.toFixed(2),
-      tx.type,
-      escapeCSVField(tx.category),
-      tx.date,
-      escapeCSVField(tx.description || ""),
-      tx.isRecurring ? "true" : "false",
-      tx.currency || "INR"
-    ].join(","));
-
-    const csvContent = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    
-    // Trigger download
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    const windowName = dateWindow === "all" ? "all_time" : dateWindow;
-    link.setAttribute("download", `x_pense_ledger_${windowName}_${new Date().toISOString().split("T")[0]}.csv`);
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    try {
+      const windowName = dateWindow === "all" ? "All Time" : dateWindow;
+      await exportToExcelWithCharts(processedTransactions, displayCurrency, windowName);
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      alert("Failed to export Excel report. Please try again.");
+    }
   };
 
   // Helper parser for quoted CSV rows
@@ -356,6 +488,7 @@ export function TransactionHistory({
       const descriptionColIdx = fileHeaders.indexOf("description");
       const isRecurringColIdx = fileHeaders.indexOf("isrecurring");
       const currencyColIdx = fileHeaders.indexOf("currency");
+      const notesColIdx = fileHeaders.indexOf("notes");
 
       for (let idx = 1; idx < validLines.length; idx++) {
         const line = validLines[idx];
@@ -401,6 +534,7 @@ export function TransactionHistory({
         }
 
         const descriptionVal = descriptionColIdx !== -1 && columns[descriptionColIdx] ? columns[descriptionColIdx].trim() : undefined;
+        const notesVal = notesColIdx !== -1 && columns[notesColIdx] ? columns[notesColIdx].trim() : undefined;
 
         let rCheck = false;
         const rStr = isRecurringColIdx !== -1 && columns[isRecurringColIdx] ? columns[isRecurringColIdx].toLowerCase().trim() : "";
@@ -422,7 +556,8 @@ export function TransactionHistory({
           date: dateVal,
           description: descriptionVal || undefined,
           isRecurring: rCheck,
-          currency: currencyVal
+          currency: currencyVal,
+          notes: notesVal || undefined
         });
       }
 
@@ -431,16 +566,19 @@ export function TransactionHistory({
         return;
       }
 
-      // Show professional preview check
-      setImportedPreview(parsedRecords);
-      const inflows = parsedRecords.filter(r => r.type === "income");
-      const outflows = parsedRecords.filter(r => r.type === "expense");
-      const totalInflowAmt = inflows.reduce((sum, r) => sum + r.amount, 0);
-      const totalOutflowAmt = outflows.reduce((sum, r) => sum + r.amount, 0);
-      
-      setImportNotice(
-        `Loaded ${parsedRecords.length} periodic postings. Inflow total value is +${formatCurrencyValue(totalInflowAmt, displayCurrency)} (${inflows.length} deposit(s)), and Outflow total is -${formatCurrencyValue(totalOutflowAmt, displayCurrency)} (${outflows.length} payment(s)).`
-      );
+      // Run automatic pattern matching rules on the newly parsed records!
+      const automatedRecords = parsedRecords.map(rec => {
+        const automatch = applyRulesToTransaction(rec.title, rec.category, rec.type, rec.tags || []);
+        return {
+          ...rec,
+          category: automatch.category,
+          tags: automatch.tags
+        };
+      });
+
+      // Redirect directly to our premium sandbox workspace!
+      setSandboxTransactions(automatedRecords);
+      setSandboxCheckedIndices(automatedRecords.map((_, i) => i));
     };
 
     reader.readAsText(file);
@@ -576,6 +714,44 @@ export function TransactionHistory({
             ))}
           </div>
 
+          {/* Tags filter pills row */}
+          {allUniqueTags.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-thin border-t border-white/[0.03] pt-2">
+              <span className="text-[10px] font-mono font-bold text-white/30 flex items-center gap-1 shrink-0 uppercase select-none">
+                <Tag className="w-3.5 h-3.5" /> Filter Tags:
+              </span>
+              <button 
+                onClick={() => setSelectedTagsFilter([])}
+                className={`px-3 py-1 rounded-full text-[10px] font-mono font-bold transition-all uppercase leading-none ${selectedTagsFilter.length === 0 ? 'bg-[#00F5FF] text-black font-bold' : 'bg-black border border-white/5 text-white/50 hover:bg-white/5 hover:text-white'}`}
+              >
+                ALL TAGS
+              </button>
+              {allUniqueTags.map(tag => {
+                const isSelected = selectedTagsFilter.includes(tag);
+                return (
+                  <button 
+                    key={tag}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedTagsFilter(selectedTagsFilter.filter(t => t !== tag));
+                      } else {
+                        setSelectedTagsFilter([...selectedTagsFilter, tag]);
+                      }
+                    }}
+                    className={`px-3 py-1 rounded-full text-[10px] font-mono font-bold transition-all uppercase flex items-center gap-1.5 shrink-0 ${
+                      isSelected 
+                        ? `bg-[#00F5FF] text-black font-bold`
+                        : `bg-black border border-white/5 text-white/50 hover:bg-white/5 hover:text-white`
+                    }`}
+                  >
+                    <Tag className="w-2.5 h-2.5" />
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* TIME WINDOW SELECTOR & REPORT EXPORT/IMPORT PANEL */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 pt-4 border-t border-white/5 items-center">
             <div className="lg:col-span-5 flex flex-wrap items-center gap-2">
@@ -629,14 +805,24 @@ export function TransactionHistory({
             )}
 
             <div className="lg:col-span-4 flex items-center justify-end gap-2 shrink-0">
+              {/* Smart Rules Button */}
+              <button
+                type="button"
+                onClick={() => setShowRulesModal(true)}
+                className="px-3 py-2 rounded-xl bg-cyan-400/10 hover:bg-[#00F5FF]/20 text-[#00F5FF] border border-cyan-500/10 hover:border-cyan-400/30 text-[10px] font-mono font-bold flex items-center gap-1.5 cursor-pointer transition-all duration-300 select-none"
+                title="Manage auto-categorization keyword patterns and payee automation rules"
+              >
+                <Settings2 className="w-3.5 h-3.5 text-[#00F5FF]" /> AUTOMATION RULES
+              </button>
+
               {/* Export Spreadsheet Button */}
               <button
                 type="button"
-                onClick={handleExportCSV}
+                onClick={handleExportExcel}
                 className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 text-[10px] font-mono font-bold flex items-center gap-1.5 cursor-pointer transition-all duration-300 select-none"
-                title="Export filtered transactions to CSV"
+                title="Export filtered transactions to Excel with charts"
               >
-                <Download className="w-3.5 h-3.5 text-[#00F5FF]" /> EXPORT REPORT
+                <Download className="w-3.5 h-3.5 text-[#00F5FF]" /> EXPORT EXCEL
               </button>
 
               {/* Upload Spreadsheet Button (Triggers Ref) */}
@@ -663,12 +849,57 @@ export function TransactionHistory({
 
       {/* LEDGER GRID POSTINGS */}
       <div className="space-y-3">
+        {processedTransactions.length > 0 && (
+          <div className="flex items-center justify-between px-5 py-3.5 bg-white/[0.01] border border-white/5 rounded-[20px] text-[10px] font-mono text-white/40 tracking-wider">
+            <div className="flex items-center gap-3">
+              <div 
+                onClick={() => {
+                  const allVisibleSelected = processedTransactions.every(t => selectedTxIds.includes(t.id));
+                  if (allVisibleSelected) {
+                    // Deselect visible
+                    const visibleIds = processedTransactions.map(t => t.id);
+                    setSelectedTxIds(prev => prev.filter(id => !visibleIds.includes(id)));
+                  } else {
+                    // Select visible
+                    const visibleIds = processedTransactions.map(t => t.id);
+                    setSelectedTxIds(prev => Array.from(new Set([...prev, ...visibleIds])));
+                  }
+                }}
+                className={`w-4 h-4 rounded-md border flex items-center justify-center cursor-pointer transition-all ${
+                  processedTransactions.length > 0 && processedTransactions.every(t => selectedTxIds.includes(t.id))
+                    ? 'bg-[#00F5FF]/15 border-[#00F5FF] text-[#00F5FF]'
+                    : 'border-white/20 bg-transparent hover:border-white/40'
+                }`}
+              >
+                {processedTransactions.length > 0 && processedTransactions.every(t => selectedTxIds.includes(t.id)) && (
+                  <Check className="w-3 h-3 text-[#00F5FF]" />
+                )}
+              </div>
+              <span className="font-bold select-none cursor-pointer" onClick={() => {
+                const allVisibleSelected = processedTransactions.every(t => selectedTxIds.includes(t.id));
+                const visibleIds = processedTransactions.map(t => t.id);
+                if (allVisibleSelected) {
+                  setSelectedTxIds(prev => prev.filter(id => !visibleIds.includes(id)));
+                } else {
+                  setSelectedTxIds(prev => Array.from(new Set([...prev, ...visibleIds])));
+                }
+              }}>SELECT ALL FILTERED POSTS ({processedTransactions.length})</span>
+            </div>
+            {selectedTxIds.length > 0 && (
+              <span className="text-cyan-400 font-extrabold select-none">
+                {selectedTxIds.length} ACTIVE {selectedTxIds.length === 1 ? 'SELECTION' : 'SELECTIONS'}
+              </span>
+            )}
+          </div>
+        )}
+
         {processedTransactions.length > 0 ? (
           processedTransactions.map((tx) => {
             const spec = CATEGORIES.find(c => c.id === tx.category) || CATEGORIES[CATEGORIES.length - 1];
             const isExpense = tx.type === "expense";
             const dateObj = new Date(tx.date);
             const formattedDate = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+            const isSelected = selectedTxIds.includes(tx.id);
 
             return (
               <motion.div 
@@ -677,12 +908,32 @@ export function TransactionHistory({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.18 }}
                 key={tx.id}
-                className="group p-4 rounded-[32px] bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 hover:border-white/10 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all"
+                className={`group p-4 rounded-[32px] bg-white/[0.03] hover:bg-white/[0.06] border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${isSelected ? 'border-cyan-500/30 bg-[#00F5FF]/5 shadow-lg shadow-cyan-500/5' : 'border-white/5 hover:border-white/10 shadow-sm'}`}
               >
-                <div 
-                  className="flex items-center gap-3.5 flex-1 cursor-pointer"
-                  onClick={() => onSelectTransaction(tx)}
-                >
+                <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                  {/* Circular visual checkbox indicator */}
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isSelected) {
+                        setSelectedTxIds(prev => prev.filter(id => id !== tx.id));
+                      } else {
+                        setSelectedTxIds(prev => [...prev, tx.id]);
+                      }
+                    }}
+                    className={`w-5 h-5 rounded-full border flex items-center justify-center cursor-pointer shrink-0 transition-all ${
+                      isSelected 
+                        ? 'bg-[#00F5FF]/10 border-[#00F5FF] text-[#00F5FF] scale-105' 
+                        : 'border-white/10 group-hover:border-white/20 hover:border-[#00F5FF]/20 bg-transparent'
+                    }`}
+                  >
+                    {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400 font-bold" />}
+                  </div>
+
+                  <div 
+                    className="flex items-center gap-3.5 flex-1 min-w-0 cursor-pointer"
+                    onClick={() => onSelectTransaction(tx)}
+                  >
                   <div 
                     className="p-3 rounded-2xl border text-white transition-all duration-300"
                     style={{ 
@@ -710,13 +961,32 @@ export function TransactionHistory({
                           <span className="text-cyan-400 font-mono font-bold select-none text-[10px] bg-cyan-500/10 px-1.5 rounded-md leading-relaxed border border-cyan-500/20">RECURRING POST</span>
                         </>
                       )}
+                      {tx.tags && tx.tags.length > 0 && (
+                        <>
+                          <span>•</span>
+                          <span className="flex items-center gap-1 flex-wrap">
+                            {tx.tags.map(t => (
+                              <span key={t} className="inline-flex items-center text-cyan-400 font-mono font-bold select-none text-[9px] bg-cyan-500/5 px-2 py-0.5 rounded border border-cyan-500/10 uppercase">
+                                #{t}
+                              </span>
+                            ))}
+                          </span>
+                        </>
+                      )}
                     </div>
+                    {tx.notes && (
+                      <div className="mt-1.5 text-[11px] text-[#00F5FF]/85 bg-[#00F5FF]/5 border border-[#00F5FF]/15 px-2.5 py-1 rounded-xl inline-flex items-center gap-1 font-sans">
+                        <span className="font-mono text-[9px] font-bold text-cyan-400 select-none uppercase">Note:</span>
+                        <span>{tx.notes}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
+              </div>
 
                 <div className="flex items-center justify-between md:justify-end gap-6 md:border-l border-white/5 md:pl-6 leading-none">
                   <div className="text-left md:text-right">
-                    <span className={`text-base font-mono font-bold tracking-tight block ${isExpense ? 'text-white/90' : 'text-cyan-405'}`}>
+                    <span className={`text-base font-mono font-bold tracking-tight block ${isExpense ? 'text-white/90' : 'text-cyan-400'}`}>
                       {isExpense ? "-" : "+"}
                       {formatCurrencyValue(tx.amount, tx.currency || "INR")}
                     </span>
@@ -829,7 +1099,7 @@ export function TransactionHistory({
                       placeholder="e.g. Blue Bottle Latte, Zara shoes..."
                       value={formData.title}
                       onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                      className="w-full bg-black border border-white/5 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-405/40 transition"
+                      className="w-full bg-black border border-white/5 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400/40 transition"
                     />
                   </div>
 
@@ -839,7 +1109,7 @@ export function TransactionHistory({
                       <select 
                         value={formData.currency}
                         onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                        className="absolute left-3 bg-[#0c0c0c] border border-white/10 rounded-xl px-2 py-1 text-[9.5px] font-mono text-cyan-455 focus:outline-none focus:ring-0 cursor-pointer"
+                        className="absolute left-3 bg-[#0c0c0c] border border-white/10 rounded-xl px-2 py-1 text-[9.5px] font-mono text-cyan-400 focus:outline-none focus:ring-0 cursor-pointer"
                       >
                         {CURRENCIES.map(c => (
                           <option key={c.code} value={c.code} className="bg-black text-white">{c.code} ({c.symbol})</option>
@@ -851,7 +1121,7 @@ export function TransactionHistory({
                         placeholder="e.g. 500.00"
                         value={formData.amount}
                         onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                        className="w-full bg-black border border-white/5 rounded-2xl pl-24 pr-4 py-2.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-455/40 transition font-mono"
+                        className="w-full bg-black border border-white/5 rounded-2xl pl-24 pr-4 py-2.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400/40 transition font-mono"
                       />
                     </div>
                   </div>
@@ -862,7 +1132,7 @@ export function TransactionHistory({
                       type="date"
                       value={formData.date}
                       onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                      className="w-full bg-black border border-white/5 rounded-2xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-455/40 transition"
+                      className="w-full bg-black border border-white/5 rounded-2xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400/40 transition"
                     />
                   </div>
                 </div>
@@ -916,14 +1186,114 @@ export function TransactionHistory({
 
                 {/* Sub-description field */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-mono tracking-wider text-white/40 uppercase font-bold">Supplemental Remarks / note</label>
+                  <label className="text-[10px] font-mono tracking-wider text-white/40 uppercase font-bold">Supplemental Remarks / description</label>
                   <textarea 
                     placeholder="Short description/memo details for later reference..."
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={2}
-                    className="w-full bg-black border border-white/5 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-455/40 transition"
+                    className="w-full bg-black border border-white/5 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400/40 transition"
                   />
+                </div>
+
+                {/* Personal Notes field */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono tracking-wider text-white/40 uppercase font-bold">Transaction Notes</label>
+                  <textarea 
+                    placeholder="Type custom notes, tags, or personal thoughts on this posting..."
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    rows={2}
+                    className="w-full bg-black border border-white/5 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400/40 transition"
+                  />
+                </div>
+
+                {/* Tags multi-selection field */}
+                <div className="space-y-2 p-3.5 bg-black border border-white/5 rounded-2xl">
+                  <label className="text-[10px] font-mono tracking-wider text-white/40 uppercase font-bold flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-[#00F5FF]" /> Transaction Tags
+                  </label>
+                  
+                  {/* Selected Tags list */}
+                  {formData.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {formData.tags.map(tag => (
+                        <span 
+                          key={tag}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#00F5FF]/10 border border-[#00F5FF]/15 text-[#00F5FF] text-[10px] font-mono uppercase font-bold"
+                        >
+                          #{tag}
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, tags: formData.tags.filter(t => t !== tag) })}
+                            className="p-0.5 rounded-lg hover:bg-[#00F5FF]/20 hover:text-white transition-all"
+                            title="Remove Tag"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add Tag row */}
+                  <div className="flex gap-2">
+                    <input 
+                      type="text"
+                      placeholder="Add tag and hit Enter..."
+                      value={newTagInput}
+                      onChange={(e) => setNewTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const val = newTagInput.trim();
+                          if (val) {
+                            onAddCustomTag(val);
+                            if (!formData.tags.includes(val)) {
+                              setFormData({ ...formData, tags: [...formData.tags, val] });
+                            }
+                            setNewTagInput("");
+                          }
+                        }
+                      }}
+                      className="flex-1 bg-[#050505] border border-white/5 rounded-xl px-3 py-2 text-xs text-white placeholder-white/20 focus:outline-none focus:border-[#00F5FF]/40 transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const val = newTagInput.trim();
+                        if (val) {
+                          onAddCustomTag(val);
+                          if (!formData.tags.includes(val)) {
+                            setFormData({ ...formData, tags: [...formData.tags, val] });
+                          }
+                          setNewTagInput("");
+                        }
+                      }}
+                      className="px-3.5 py-2 bg-[#00F5FF]/10 hover:bg-[#00F5FF]/20 text-[#00F5FF] text-[10.5px] font-mono uppercase font-bold border border-[#00F5FF]/20 rounded-xl transition cursor-pointer"
+                    >
+                      ADD
+                    </button>
+                  </div>
+
+                  {/* Available tags recommendations */}
+                  {allUniqueTags.filter(t => !formData.tags.includes(t)).length > 0 && (
+                    <div className="space-y-1.5 pt-1.5">
+                      <span className="text-[9px] font-mono text-white/30 uppercase tracking-wider block">Recommended Tags:</span>
+                      <div className="flex flex-wrap gap-1 max-h-[75px] overflow-y-auto scrollbar-none">
+                        {allUniqueTags.filter(t => !formData.tags.includes(t)).map(tag => (
+                          <button
+                            type="button"
+                            key={tag}
+                            onClick={() => setFormData({ ...formData, tags: [...formData.tags, tag] })}
+                            className="px-2 py-0.5 bg-white/[0.02] hover:bg-white/[0.08] text-white/50 hover:text-white text-[9px] font-mono uppercase rounded-lg border border-white/5 transition"
+                          >
+                            +{tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Confirm Post Button */}
@@ -941,16 +1311,161 @@ export function TransactionHistory({
         )}
       </AnimatePresence>
 
-      {/* MODAL SPREADSHEET IMPORT CONFIRMATION PREVIEW */}
+      {/* --- Cosmic Ledger Productivity UI Layout Additions --- */}
+
+      {/* 1. FLOATING CORNER BULK ACTIONS BAR */}
       <AnimatePresence>
-        {importedPreview && (
+        {selectedTxIds.length > 0 && (
+          <motion.div 
+            initial={{ y: 80, opacity: 0, scale: 0.95 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 80, opacity: 0, scale: 0.95 }}
+            transition={{ type: "spring", damping: 20, stiffness: 260 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[92%] max-w-xl p-4 bg-[#0a0a0af5] backdrop-blur-md rounded-[28px] border border-cyan-500/30 shadow-2xl shadow-cyan-500/10 flex flex-wrap items-center justify-between gap-4"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center font-mono text-xs text-cyan-400 font-bold">
+                {selectedTxIds.length}
+              </div>
+              <div>
+                <h5 className="text-[11px] font-sans font-bold text-white uppercase tracking-wider">Batch Operations Enabled</h5>
+                <p className="text-[9.5px] font-mono text-white/40">APPLY ACTIONS TO {selectedTxIds.length} SELECTED BOOKINGS</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Export Selected */}
+              <button
+                type="button"
+                onClick={() => {
+                  const toExport = transactions.filter(t => selectedTxIds.includes(t.id));
+                  exportToExcelWithCharts(toExport, displayCurrency, `Selected (${toExport.length})`);
+                }}
+                className="p-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 hover:border-white/10 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all"
+                title="Export selected rows to Excel"
+              >
+                <Download className="w-3 h-3 text-[#00F5FF]" /> EXPORT ({selectedTxIds.length})
+              </button>
+
+              {/* Bulk Categorize Dropdown */}
+              <div className="relative group/cat">
+                <button
+                  type="button"
+                  className="p-2 px-3 rounded-xl bg-white/5 hover:bg-[#00F5FF]/10 text-white hover:text-cyan-400 border border-white/5 hover:border-[#00F5FF]/20 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <Filter className="w-3 h-3 text-[#00F5FF]" /> CATEGORIZE
+                </button>
+                <div className="absolute bottom-full right-0 mb-2 hidden group-hover/cat:block bg-[#0e0e0e] border border-white/10 rounded-2xl p-2 w-48 shadow-2xl z-50 animate-fadeIn divide-y divide-white/5 max-h-[220px] overflow-y-auto custom-scrollbar">
+                  <span className="block p-1.5 text-[8.5px] font-mono text-white/30 uppercase tracking-widest font-extrabold pb-1">ASSIGN CATEGORY</span>
+                  {CATEGORIES.map(cat => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Are you sure you want to change the category of these ${selectedTxIds.length} transaction(s) to "${cat.name}"?`)) {
+                          const updated = transactions.map(t => {
+                            if (selectedTxIds.includes(t.id)) {
+                              return { ...t, category: cat.id };
+                            }
+                            return t;
+                          });
+                          if (onSyncTransactions) {
+                            onSyncTransactions(updated);
+                            setSelectedTxIds([]);
+                          } else {
+                            alert("State synchronization handler missing.");
+                          }
+                        }
+                      }}
+                      className="w-full text-left p-2 rounded-lg text-[10px] font-mono font-bold text-white/70 hover:text-white hover:bg-white/5 transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cat.color }} />
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bulk Tag Dropdown */}
+              <div className="relative group/tag">
+                <button
+                  type="button"
+                  className="p-2 px-3 rounded-xl bg-white/5 hover:bg-[#00F5FF]/10 text-white hover:text-cyan-400 border border-white/5 hover:border-[#00F5FF]/20 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <Tag className="w-3 h-3 text-[#00F5FF]" /> TAG
+                </button>
+                <div className="absolute bottom-full right-0 mb-2 hidden group-hover/tag:block bg-[#0e0e0e] border border-white/10 rounded-2xl p-2 w-44 shadow-2xl z-50 animate-fadeIn divide-y divide-white/5 max-h-[180px] overflow-y-auto custom-scrollbar">
+                  <span className="block p-1.5 text-[8.5px] font-mono text-white/30 uppercase tracking-widest font-extrabold pb-1">TOGGLE TAGS</span>
+                  {availableTags.map(tag => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => {
+                        const updated = transactions.map(t => {
+                          if (selectedTxIds.includes(t.id)) {
+                            const tags = t.tags || [];
+                            const isPresent = tags.includes(tag);
+                            const updatedTags = isPresent ? tags.filter(x => x !== tag) : [...tags, tag];
+                            return { ...t, tags: updatedTags };
+                          }
+                          return t;
+                        });
+                        if (onSyncTransactions) {
+                          onSyncTransactions(updated);
+                        }
+                      }}
+                      className="w-full text-left p-2 rounded-lg text-[10px] font-mono font-medium text-white/70 hover:text-white hover:bg-white/5 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Tag className="w-2.5 h-2.5 text-[#00F5FF]" />
+                      <span className="truncate">{tag}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bulk Delete */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm(`Are you absolutely sure you want to permanently delete these ${selectedTxIds.length} selected postings?`)) {
+                    if (onSyncTransactions) {
+                      const remaining = transactions.filter(t => !selectedTxIds.includes(t.id));
+                      onSyncTransactions(remaining);
+                      setSelectedTxIds([]);
+                    } else if (onDeleteTransaction) {
+                      selectedTxIds.forEach(id => onDeleteTransaction(id));
+                      setSelectedTxIds([]);
+                    }
+                  }
+                }}
+                className="p-2 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 hover:border-rose-500 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all duration-300"
+              >
+                <Trash2 className="w-3 h-3" /> DELETE ({selectedTxIds.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedTxIds([])}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all cursor-pointer flex items-center justify-center"
+                title="Cancel selection"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 2. MODAL: FOR INTUITIVE CATEGORIZATION AUTOMATION RULES */}
+      <AnimatePresence>
+        {showRulesModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Blurry dim backing */}
+            {/* Backdrop */}
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setImportedPreview(null)}
+              onClick={() => setShowRulesModal(false)}
               className="absolute inset-0 bg-black/80 backdrop-blur-sm"
             />
 
@@ -960,73 +1475,506 @@ export function TransactionHistory({
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 350 }}
-              className="relative w-full max-w-lg bg-[#0a0a0a] rounded-[32px] border border-white/5 shadow-2xl overflow-hidden z-10 p-6 space-y-4"
+              className="relative w-full max-w-2xl bg-[#0a0a0a] rounded-[32px] border border-cyan-500/10 shadow-2xl overflow-hidden z-10 p-6 space-y-6"
             >
               <div className="absolute top-0 left-0 w-full h-1 bg-[#00F5FF]" />
               
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <div>
                   <h3 className="text-md font-sans font-bold text-white flex items-center gap-2">
-                    <Upload className="w-5 h-5 text-[#00F5FF]" /> Import Ledger Roll
+                    <Settings2 className="w-5 h-5 text-[#00F5FF]" /> Payee Automation Rules Engine
                   </h3>
-                  <p className="text-[10px] text-white/40 font-mono">CONFIRM SPREADSHEET PERIODIC DATA</p>
+                  <p className="text-[10px] text-white/40 font-mono">AUTOMATED CATEGORY AND TAG ATTACHER</p>
                 </div>
                 <button 
-                  onClick={() => setImportedPreview(null)}
+                  type="button"
+                  onClick={() => setShowRulesModal(false)}
                   className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-white/40 hover:text-white transition-all cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Status breakdown message */}
-              <div className="p-4 bg-cyan-500/5 border border-cyan-400/10 rounded-2xl text-xs text-white/80 leading-relaxed font-sans font-medium">
-                {importNotice}
-              </div>
+              {/* Form to create new rule */}
+              <form onSubmit={handleAddRule} className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl space-y-4">
+                <span className="text-[9.5px] font-mono font-bold text-[#00F5FF] uppercase block tracking-wider">Configure New Automation Trigger:</span>
+                
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                  {/* Keyword Trigger */}
+                  <div className="md:col-span-4 space-y-1">
+                    <label className="text-[9px] font-mono text-white/40 uppercase">Payee Keyword Match</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Uber, Netflix, Amazon"
+                      value={newRuleKeyword}
+                      onChange={(e) => setNewRuleKeyword(e.target.value)}
+                      className="w-full bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400"
+                      required
+                    />
+                  </div>
 
-              {/* Collapsible preview table */}
-              <div className="space-y-1.5">
-                <span className="text-[9px] font-mono tracking-wider text-white/45 uppercase font-bold">Ledger sample preview:</span>
-                <div className="max-h-[160px] overflow-y-auto border border-white/5 bg-black rounded-2xl custom-scrollbar divide-y divide-white/5 text-[10px] font-mono">
-                  {importedPreview.slice(0, 5).map((item, colIdx) => (
-                    <div key={colIdx} className="p-2.5 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.type === 'income' ? 'bg-cyan-400' : 'bg-rose-450'}`} />
-                        <div className="truncate">
-                          <span className="text-white/80 font-bold block truncate">{item.title}</span>
-                          <span className="text-white/30 text-[9px] uppercase">{item.category} • {item.date}</span>
+                  {/* Type */}
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[9px] font-mono text-white/40 uppercase">Type</label>
+                    <select
+                      value={newRuleType}
+                      onChange={(e: any) => setNewRuleType(e.target.value)}
+                      className="w-full bg-black border border-white/10 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-400 cursor-pointer text-white"
+                    >
+                      <option value="expense">Expense</option>
+                      <option value="income">Income</option>
+                    </select>
+                  </div>
+
+                  {/* Category */}
+                  <div className="md:col-span-3 space-y-1">
+                    <label className="text-[9px] font-mono text-white/40 uppercase">Assert Category</label>
+                    <select
+                      value={newRuleCategory}
+                      onChange={(e) => setNewRuleCategory(e.target.value)}
+                      className="w-full bg-black border border-white/10 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-400 cursor-pointer text-white"
+                    >
+                      {CATEGORIES.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Submit */}
+                  <div className="md:col-span-3">
+                    <button
+                      type="submit"
+                      className="w-full py-2 rounded-xl bg-[#00F5FF] hover:bg-cyan-400 text-black text-xs font-mono font-bold uppercase transition-all shadow-md cursor-pointer"
+                    >
+                      ADD RULE
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] font-mono text-white/40 uppercase">Auto-Apply Tags (Comma Separated)</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Business, Subscription"
+                    value={newRuleTagInput}
+                    onChange={(e) => setNewRuleTagInput(e.target.value)}
+                    className="w-full bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+              </form>
+
+              {/* Existing Rules List */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-[9.5px] font-mono font-bold text-white/50 uppercase tracking-wider">Registered Keyword Matchers ({rules.length}):</span>
+                  {onSyncTransactions && (
+                    <button
+                      type="button"
+                      onClick={runRulesRetroactively}
+                      className="px-2.5 py-1 rounded-lg bg-cyan-400/10 hover:bg-cyan-400 text-cyan-400 hover:text-black border border-cyan-400/20 hover:border-cyan-400 text-[9.5px] font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Apply active keyword rules retroactively to all currently recorded accounting logs"
+                    >
+                      <Wand2 className="w-3 h-3 text-cyan-400 hover:text-black" /> RETROACTIVE RE-RUN
+                    </button>
+                  )}
+                </div>
+
+                <div className="max-h-[220px] overflow-y-auto divide-y divide-white/5 border border-white/5 bg-black rounded-2xl custom-scrollbar">
+                  {rules.length === 0 ? (
+                    <div className="py-8 text-center text-white/20 text-xs font-mono leading-relaxed">
+                      No custom auto-categorization criteria registered yet.<br />Add a trigger pattern matching trigger keyword above!
+                    </div>
+                  ) : (
+                    rules.map(rule => {
+                      const targetSpec = CATEGORIES.find(c => c.id === rule.category) || CATEGORIES[CATEGORIES.length - 1];
+                      return (
+                        <div key={rule.id} className="p-3 flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div 
+                              onClick={() => handleToggleRule(rule.id)}
+                              className={`w-3.5 h-3.5 rounded border flex items-center justify-center cursor-pointer transition-all ${
+                                rule.isActive 
+                                  ? 'bg-[#00F5FF]/10 border-[#00F5FF] text-[#00F5FF]' 
+                                  : 'border-white/10 bg-transparent'
+                              }`}
+                            >
+                              {rule.isActive && <Check className="w-2.5 h-2.5 text-cyan-400 font-bold" />}
+                            </div>
+
+                            <div className="space-y-0.5">
+                              <span className="text-white/80 font-mono font-bold text-xs">
+                                Matcher: <b className="text-[#00F5FF] font-black underline decoration-cyan-500/30">"{rule.keyword}"</b>
+                              </span>
+                              <div className="flex flex-wrap items-center gap-2 text-[9px] font-mono text-white/40">
+                                <span className={`uppercase font-bold ${rule.type === 'income' ? 'text-cyan-400' : 'text-rose-400'}`}>
+                                  {rule.type}
+                                </span>
+                                <span>➔</span>
+                                <span className="flex items-center gap-1.5 font-bold text-white/60">
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: targetSpec.color }} />
+                                  {targetSpec.name}
+                                </span>
+                                {rule.tags && rule.tags.length > 0 && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="flex items-center gap-1 uppercase">
+                                      {rule.tags.map(t => (
+                                        <span key={t} className="text-cyan-400 bg-cyan-500/10 px-1 rounded font-bold">#{t}</span>
+                                      ))}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRule(rule.id)}
+                            className="p-1.5 rounded-xl bg-white/5 hover:bg-rose-500/15 text-white/40 hover:text-rose-400 border border-white/5 hover:border-rose-500/20 transition-all cursor-pointer"
+                            title="Delete automation rule"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                      </div>
-                      <span className={`font-bold shrink-0 text-right ${item.type === 'income' ? 'text-cyan-405' : 'text-white/80'}`}>
-                        {item.type === 'income' ? '+' : '-'}${item.amount.toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                  {importedPreview.length > 5 && (
-                    <div className="p-2 text-center text-white/30 text-[9px] italic">
-                      + {importedPreview.length - 5} more entries in spreadsheet
-                    </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
 
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowRulesModal(false)}
+                  className="px-6 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white font-mono text-xs font-bold border border-white/10 transition-all cursor-pointer"
+                >
+                  DISMISS
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 3. MODAL: EXCEL SPREADSHEET SANDBOX WORKSPACE */}
+      <AnimatePresence>
+        {sandboxTransactions && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Dim backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSandboxTransactions(null)}
+              className="absolute inset-0 bg-black/85 backdrop-blur-md"
+            />
+
+            {/* Large Grid Workspace Box */}
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0, y: 30 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.96, opacity: 0, y: 30 }}
+              transition={{ type: "spring", damping: 26, stiffness: 320 }}
+              className="relative w-full max-w-5xl bg-[#080808] rounded-[32px] border border-cyan-500/20 shadow-2xl overflow-hidden z-10 p-6 flex flex-col max-h-[88vh] space-y-5"
+            >
+              <div className="absolute top-0 left-0 w-full h-1 bg-[#00F5FF]" />
+              
+              {/* Workspace Header */}
+              <div className="flex justify-between items-center pb-2 border-b border-white/5 font-sans">
+                <div>
+                  <h3 className="text-md font-sans font-bold text-white flex items-center gap-2">
+                    <Wand2 className="w-5 h-5 text-[#00F5FF]" /> Spreadsheet Import Sandbox Workspace
+                  </h3>
+                  <p className="text-[10px] text-white/40 font-mono">INTERACT AND CLEANSE TRANSACTION POSTINGS BEFORE RECORDING</p>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setSandboxTransactions(null)}
+                  className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-white/40 hover:text-white transition-all cursor-pointer font-bold shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Sandbox statistics info bar */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-cyan-500/5 rounded-2xl border border-cyan-500/10 text-xs text-white/95 leading-relaxed">
+                <div className="text-center border-r border-white/5 pr-3">
+                  <span className="text-[9px] font-mono text-white/40 uppercase block mb-0.5">Approved Ledger Injection</span>
+                  <b className="text-cyan-400 font-mono font-bold text-base">
+                    {sandboxCheckedIndices.length} of {sandboxTransactions.length} Postings
+                  </b>
+                </div>
+                <div className="text-center border-r border-white/5 pr-3 pl-3">
+                  <span className="text-[9px] font-mono text-[#10B981] uppercase block mb-0.5">Calculated Deposit Inflow</span>
+                  <b className="text-[#10B981] font-mono font-bold text-sm">
+                    +{formatCurrencyValue(
+                      sandboxTransactions
+                        .filter((_, idx) => sandboxCheckedIndices.includes(idx))
+                        .filter(r => r.type === "income")
+                        .reduce((sum, r) => sum + r.amount, 0),
+                      displayCurrency
+                    )}
+                  </b>
+                </div>
+                <div className="text-center pl-3">
+                  <span className="text-[9px] font-mono text-rose-400 uppercase block mb-0.5 font-bold">Calculated Outflow Expense</span>
+                  <b className="text-rose-400 font-mono font-bold text-sm">
+                    -{formatCurrencyValue(
+                      sandboxTransactions
+                        .filter((_, idx) => sandboxCheckedIndices.includes(idx))
+                        .filter(r => r.type === "expense")
+                        .reduce((sum, r) => sum + r.amount, 0),
+                      displayCurrency
+                    )}
+                  </b>
+                </div>
+              </div>
+
+              {/* Bulk tools for Sandbox */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white/[0.02] border border-white/5 rounded-2xl">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allSelected = sandboxCheckedIndices.length === sandboxTransactions.length;
+                      if (allSelected) {
+                        setSandboxCheckedIndices([]);
+                      } else {
+                        setSandboxCheckedIndices(sandboxTransactions.map((_, i) => i));
+                      }
+                    }}
+                    className="p-1.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-mono text-[9px] font-bold border border-white/5 cursor-pointer transition-all duration-200"
+                  >
+                    {sandboxCheckedIndices.length === sandboxTransactions.length ? "DESELECT ALL" : "SELECT ALL"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const remaining = sandboxTransactions.filter((_, idx) => !sandboxCheckedIndices.includes(idx));
+                      setSandboxTransactions(remaining.length > 0 ? remaining : null);
+                      setSandboxCheckedIndices([]);
+                    }}
+                    disabled={sandboxCheckedIndices.length === 0}
+                    className="p-1.5 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500 hover:text-white text-rose-400 font-mono text-[9px] font-bold border border-rose-500/20 disabled:opacity-40 disabled:hover:bg-rose-500/10 disabled:cursor-not-allowed cursor-pointer transition-all"
+                  >
+                    OMIT CHECKED ROWS ({sandboxCheckedIndices.length})
+                  </button>
+                </div>
+
+                {/* Set Category for all checked inside sandbox */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-mono text-white/30 uppercase">Batch set Category:</span>
+                  <select
+                    value={sandboxBulkCategory}
+                    onChange={(e) => {
+                      const targetCat = e.target.value;
+                      if (!targetCat) return;
+                      const updated = sandboxTransactions.map((tx, idx) => {
+                        if (sandboxCheckedIndices.includes(idx)) {
+                          return { ...tx, category: targetCat };
+                        }
+                        return tx;
+                      });
+                      setSandboxTransactions(updated);
+                      setSandboxBulkCategory("");
+                    }}
+                    className="bg-black border border-white/10 text-white text-[10px] font-mono py-1 px-2 rounded-xl focus:outline-none focus:border-cyan-400 cursor-pointer"
+                  >
+                    <option value="">-- Choose Category --</option>
+                    {CATEGORIES.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Scrollable Spreadsheet Sheet Simulator */}
+              <div className="flex-1 overflow-auto border border-white/5 rounded-2xl custom-scrollbar relative">
+                <table className="w-full text-left font-mono text-[10px] border-collapse relative min-w-[700px]">
+                  <thead className="sticky top-0 bg-[#0c0c0c] text-white/40 uppercase select-none z-10 border-b border-white/5">
+                    <tr>
+                      <th className="p-3 w-12 text-center">Inc</th>
+                      <th className="p-3 w-28">Date</th>
+                      <th className="p-3">Posting Title Payee</th>
+                      <th className="p-3 w-28 text-right">Amount</th>
+                      <th className="p-3 w-24 text-center">Type</th>
+                      <th className="p-3 w-36">Category</th>
+                      <th className="p-3 w-28 text-center">Tag Attachments</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 bg-black">
+                    {sandboxTransactions.map((row, idx) => {
+                      const isChecked = sandboxCheckedIndices.includes(idx);
+                      const hasMatchingRule = rules.some(r => r.isActive && r.type === row.type && row.title.toLowerCase().includes(r.keyword.toLowerCase()));
+
+                      return (
+                        <tr key={idx} className={`hover:bg-white/[0.02] transition-colors ${isChecked ? "bg-cyan-500/[0.01]" : "opacity-45 bg-black/40"}`}>
+                          {/* Include Toggle checkbox */}
+                          <td className="p-2 text-center">
+                            <div 
+                              onClick={() => {
+                                if (isChecked) {
+                                  setSandboxCheckedIndices(prev => prev.filter(i => i !== idx));
+                                } else {
+                                  setSandboxCheckedIndices(prev => [...prev, idx]);
+                                }
+                              }}
+                              className={`w-4 h-4 rounded mx-auto border flex items-center justify-center cursor-pointer transition-all duration-150 ${
+                                isChecked ? "bg-[#00F5FF]/15 border-[#00F5FF] text-[#00F5FF]" : "border-white/20 hover:border-white/45 bg-transparent"
+                              }`}
+                            >
+                              {isChecked && <Check className="w-3 h-3 text-[#00F5FF]" />}
+                            </div>
+                          </td>
+
+                          {/* Date Input */}
+                          <td className="p-2">
+                            <input 
+                              type="date"
+                              value={row.date}
+                              className="bg-transparent border-0 text-white w-full focus:outline-none font-mono focus:bg-white/5 rounded p-1"
+                              onChange={(e) => {
+                                const updated = [...sandboxTransactions];
+                                updated[idx] = { ...row, date: e.target.value };
+                                setSandboxTransactions(updated);
+                              }}
+                            />
+                          </td>
+
+                          {/* Title Payee Input */}
+                          <td className="p-2">
+                            <div className="flex items-center gap-1.5 w-full">
+                              <input 
+                                type="text"
+                                value={row.title}
+                                className="bg-transparent border-0 text-white font-sans w-full focus:outline-none focus:bg-white/5 rounded p-1 font-semibold"
+                                onChange={(e) => {
+                                  const updated = [...sandboxTransactions];
+                                  const revisedTitle = e.target.value;
+                                  // Re-apply rules if payee changes dynamically!
+                                  const ruleRun = applyRulesToTransaction(revisedTitle, row.category, row.type, row.tags);
+                                  
+                                  updated[idx] = { 
+                                    ...row, 
+                                    title: revisedTitle,
+                                    category: ruleRun.wasMatched ? ruleRun.category : row.category,
+                                    tags: ruleRun.tags
+                                  };
+                                  setSandboxTransactions(updated);
+                                }}
+                              />
+                              {hasMatchingRule && (
+                                <span className="p-1 px-1.5 shrink-0 bg-emerald-500/10 border border-emerald-500/20 text-[#10B981] text-[8px] font-mono font-bold rounded-lg uppercase tracking-wider animate-pulse flex items-center gap-0.5">
+                                  ✨ MATCH
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Amount Input */}
+                          <td className="p-2">
+                            <input 
+                              type="number"
+                              step="0.01"
+                              value={row.amount === 0 ? "" : row.amount}
+                              className="bg-transparent border-0 text-white text-right w-full focus:outline-none font-mono focus:bg-white/5 rounded p-1 font-bold"
+                              onChange={(e) => {
+                                const updated = [...sandboxTransactions];
+                                updated[idx] = { ...row, amount: parseFloat(e.target.value) || 0 };
+                                setSandboxTransactions(updated);
+                              }}
+                              placeholder="0.00"
+                            />
+                          </td>
+
+                          {/* Type Toggle */}
+                          <td className="p-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = [...sandboxTransactions];
+                                const revisedType: TransactionType = row.type === "expense" ? "income" : "expense";
+                                const revisedCategory = revisedType === "income" ? "Income" : "Food & Dining";
+                                updated[idx] = { ...row, type: revisedType, category: revisedCategory };
+                                setSandboxTransactions(updated);
+                              }}
+                              className={`text-[8.5px] font-mono leading-none font-bold py-1 px-2 rounded-lg border cursor-pointer transition-all ${
+                                row.type === "income" 
+                                  ? "bg-[#10B981]/10 border-[#10B981]/30 text-[#10B981] hover:bg-[#10B981]/20" 
+                                  : "bg-rose-500/10 border-rose-500/25 text-rose-400 hover:bg-rose-500/20"
+                              }`}
+                            >
+                              {row.type.toUpperCase()}
+                            </button>
+                          </td>
+
+                          {/* Category Selector */}
+                          <td className="p-2">
+                            <select
+                              value={row.category}
+                              className="bg-black border-0 text-white w-full focus:outline-none font-mono focus:bg-white/5 rounded p-1 cursor-pointer text-white"
+                              onChange={(e) => {
+                                const updated = [...sandboxTransactions];
+                                updated[idx] = { ...row, category: e.target.value };
+                                setSandboxTransactions(updated);
+                              }}
+                            >
+                              {CATEGORIES.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                          </td>
+
+                          {/* Simple inline custom tags */}
+                          <td className="p-2">
+                            <input 
+                              type="text"
+                              value={row.tags ? row.tags.join(", ") : ""}
+                              className="bg-transparent border-0 text-cyan-400 placeholder-white/20 w-full focus:outline-none font-mono focus:bg-white/5 rounded p-1 text-[9px] uppercase font-bold"
+                              placeholder="ADD TAGS..."
+                              onChange={(e) => {
+                                const updated = [...sandboxTransactions];
+                                const tArr = e.target.value.split(",").map(s => s.trim()).filter(s => s.length > 0);
+                                updated[idx] = { ...row, tags: tArr };
+                                setSandboxTransactions(updated);
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Modal Buttons */}
               <div className="flex gap-3 pt-2">
                 <button 
                   type="button"
-                  onClick={() => setImportedPreview(null)}
-                  className="flex-1 py-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 text-white text-xs font-mono font-bold tracking-wider uppercase transition-all"
+                  onClick={() => setSandboxTransactions(null)}
+                  className="flex-1 py-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 text-white text-xs font-mono font-bold tracking-wider uppercase transition-all cursor-pointer"
                 >
-                  ABORT
+                  DISCARD STATEMENT
                 </button>
+                
                 <button 
                   type="button"
                   onClick={() => {
-                    onImportTransactions(importedPreview);
-                    setImportedPreview(null);
+                    const approvedRows = sandboxTransactions.filter((_, idx) => sandboxCheckedIndices.includes(idx));
+                    if (approvedRows.length === 0) {
+                      alert("Please select or approve at least one ledger listing posting row to commit.");
+                      return;
+                    }
+                    onImportTransactions(approvedRows);
+                    setSandboxTransactions(null);
+                    setSandboxCheckedIndices([]);
+                    alert(`Successfully recorded spreadsheet batch entry containing ${approvedRows.length} checked bookkeeping records!`);
                   }}
-                  className="flex-grow-[2] py-3 rounded-2xl bg-[#00F5FF] hover:bg-cyan-400 text-black text-xs font-mono font-bold tracking-wider uppercase transition-all shadow-lg shadow-cyan-950/20"
+                  className="flex-grow-[2] py-3.5 rounded-2xl bg-[#00F5FF] hover:bg-cyan-400 text-black text-xs font-mono font-bold tracking-wider uppercase transition-all shadow-lg shadow-cyan-950/20 cursor-pointer"
                 >
-                  CONFIRM & INJECT BOOKINGS
+                  TRANSMIT {sandboxCheckedIndices.length} APPROVED POSTS TO LEDGER
                 </button>
               </div>
             </motion.div>
