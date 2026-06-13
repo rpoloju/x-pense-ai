@@ -469,15 +469,42 @@ export async function exportToExcelWithCharts(
   const fileBlob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
-  const objectUrl = URL.createObjectURL(fileBlob);
 
   const cleanWindowStr = dateWindowName === "all" ? "all_time" : dateWindowName;
+  const fileName = `aura_ledger_financial_report_${cleanWindowStr}_${new Date().toISOString().split("T")[0]}.xlsx`;
+
+  // Try the premium HTML5 File System Access API: requests folder permissions and saves directly to chosen directory
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+    try {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: fileName,
+        types: [
+          {
+            description: "Excel Spreadsheet Ledger",
+            accept: {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+            },
+          },
+        ],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(fileBlob);
+      await writable.close();
+      return; // Successfully saved via modern files permission prompt!
+    } catch (fsErr: any) {
+      if (fsErr.name === "AbortError") {
+        console.log("User cancelled file save location selection.");
+        return;
+      }
+      console.warn("File System Access API failed, not supported, or restricted inside iframe sandbox. Using classic auto download.", fsErr);
+    }
+  }
+
+  // Fallback to classic browser anchor click download
+  const objectUrl = URL.createObjectURL(fileBlob);
   const downloadLink = document.createElement("a");
   downloadLink.setAttribute("href", objectUrl);
-  downloadLink.setAttribute(
-    "download",
-    `aura_ledger_financial_report_${cleanWindowStr}_${new Date().toISOString().split("T")[0]}.xlsx`
-  );
+  downloadLink.setAttribute("download", fileName);
   downloadLink.style.display = "none";
   document.body.appendChild(downloadLink);
   downloadLink.click();

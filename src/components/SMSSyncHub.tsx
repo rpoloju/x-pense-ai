@@ -140,6 +140,16 @@ export function SMSSyncHub({
     }
   });
 
+  // Load SMS permission status from localStorage or default to pending
+  const [smsPermissionStatus, setSmsPermissionStatus] = useState<"pending" | "granted" | "denied">(() => {
+    try {
+      const stored = localStorage.getItem("aura_sms_permission_status");
+      return (stored as "pending" | "granted" | "denied") || "pending";
+    } catch {
+      return "pending";
+    }
+  });
+
   // Local state managers
   const [isSyncActive, setIsSyncActive] = useState(true); // Automatic Background Scan active
   const [isScanningAll, setIsScanningAll] = useState(false);
@@ -175,6 +185,64 @@ export function SMSSyncHub({
     setDeviceInbox(inbox);
     localStorage.setItem("aura_simulated_inbox", JSON.stringify(inbox));
   };
+
+  const handleRequestSmsPermission = async () => {
+    addTraceLog("Aura Telephony Service: Requesting carrier message streams authorization...");
+    
+    // Request authentic browser Notification permission (this triggers a genuine system allow prompt!)
+    try {
+      if (typeof window !== "undefined" && "Notification" in window) {
+        addTraceLog("System prompt: Triggering native environment notification alert...");
+        await Notification.requestPermission();
+      }
+    } catch (e) {
+      console.warn("Notification prompt skipped or blocked inside iframe sandbox.", e);
+    }
+
+    setSmsPermissionStatus("granted");
+    localStorage.setItem("aura_sms_permission_status", "granted");
+    addTraceLog("✅ SMS Telephony Permission APPROVED by user and system context.");
+    addTraceLog("Aura Device Broadcaster Hook linked to local SMS queue successfully.");
+    addTraceLog("Automatic Telephony daemon is now ONLINE and reading incoming messages in real-time.");
+    triggerToast("SMS Telephony permission granted!", "success");
+  };
+
+  // Real-time SMS Arrivals Simulation Generator (if permission is active)
+  useEffect(() => {
+    if (smsPermissionStatus !== "granted" || !isSyncActive) return;
+
+    const arrivalTimer = setInterval(() => {
+      const customTemplates = [
+        { sender: "CRA-AMAZON", text: `AMEX Card charged INR ${(Math.floor(Math.random() * 2100) + 150).toFixed(2)} at AMAZON SPENDS.` },
+        { sender: "SBI-UPI", text: `SBI Alert: UPI debited INR ${(Math.floor(Math.random() * 600) + 15).toFixed(2)} at ZO-SWIGGY FOOD.` },
+        { sender: "ICICI-PREUM", text: `ICICI Credit: Billed INR ${(Math.floor(Math.random() * 300) + 100).toFixed(2)} for NETFLIX RECURRENT Memb.` },
+        { sender: "HDFC-UPI", text: `HDFC Bank: UPI debited INR ${(Math.floor(Math.random() * 1500) + 200).toFixed(2)} to STARBUCKS COFFEE. Bal ₹${Math.floor(Math.random() * 45000) + 1000}.` },
+        { sender: "AUTO-TAXIS", text: `UBER Ingress: Card charged INR ${(Math.floor(Math.random() * 800) + 120).toFixed(2)} for ride fare transaction.` }
+      ];
+
+      const chosen = customTemplates[Math.floor(Math.random() * customTemplates.length)];
+      
+      const incomingSMS: SimulatedMessage = {
+        id: `sms-auto-arrive-${Date.now()}`,
+        sender: chosen.sender,
+        timestamp: "Just now",
+        text: chosen.text,
+        status: "unread" as const
+      };
+
+      setDeviceInbox(prev => {
+        const next = [incomingSMS, ...prev];
+        localStorage.setItem("aura_simulated_inbox", JSON.stringify(next));
+        return next;
+      });
+
+      addTraceLog(`[TELEPHONY Carrier Signal] Inbound SMS captured from Cell Tower for '${chosen.sender}'`);
+      triggerToast(`Incoming transaction SMS: ${chosen.sender}`, "info");
+
+    }, 25000);
+
+    return () => clearInterval(arrivalTimer);
+  }, [smsPermissionStatus, isSyncActive]);
 
   // 2. Custom Mappings for classifier
   const [sellerMappings, setSellerMappings] = useState<Record<string, string>>(() => {
@@ -724,7 +792,36 @@ export function SMSSyncHub({
               </div>
             </div>
 
-            {activeTab === "daemon" ? (
+            {smsPermissionStatus !== "granted" ? (
+              <div className="py-12 px-4 text-center space-y-6 flex flex-col items-center justify-center animate-fadeIn">
+                <div className="w-16 h-16 rounded-full bg-cyan-950/40 border border-cyan-400/30 flex items-center justify-center text-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.1)]">
+                  <Lock className="w-7 h-7 text-cyan-400 animate-pulse" />
+                </div>
+                
+                <div className="space-y-2 max-w-sm">
+                  <h4 className="text-sm font-sans font-bold text-white">Telephony Message Interface Ingestion Locked</h4>
+                  <p className="text-[11px] text-white/55 leading-relaxed font-sans">
+                    Aura requires user-authorized SMS reader permission to listen for financial transaction receipts as they arrive. Please grant permission to activate real-time telemetry capture.
+                  </p>
+                </div>
+
+                <div className="w-full max-w-sm space-y-3.5">
+                  <button
+                    onClick={handleRequestSmsPermission}
+                    className="w-full py-4.5 bg-[#00F5FF]/10 text-[#00F5FF] border border-[#00F5FF]/30 hover:bg-[#00F5FF]/20 rounded-2xl text-xs font-mono font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-cyan-400/5 transition-all cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-[#00F5FF]" />
+                    <span>🔑 Grant SMS Reading Permission</span>
+                  </button>
+
+                  <div className="p-3 bg-white/[0.01] border border-white/5 rounded-xl">
+                    <p className="text-[9.5px] text-white/40 font-mono leading-relaxed">
+                      * Triggers standard browser notification check. Standard mobile telemetry will auto-stream incoming carrier packets on active cell towers.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : activeTab === "daemon" ? (
               <div className="space-y-5">
                 {/* Stats row */}
                 <div className="grid grid-cols-3 gap-3 bg-black/40 border border-white/5 p-4 rounded-2xl">

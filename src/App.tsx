@@ -29,7 +29,9 @@ import {
   Tag,
   PiggyBank,
   Command,
-  HelpCircle
+  HelpCircle,
+  Edit3,
+  Check
 } from "lucide-react";
 
 import { Transaction, Budget } from "./types";
@@ -145,20 +147,53 @@ export default function App() {
     }
   };
 
+  const handleUpdateTransaction = (updatedTx: Transaction) => {
+    const updated = transactions.map(t => t.id === updatedTx.id ? updatedTx : t);
+    syncTransactions(updated);
+    if (selectedTransaction?.id === updatedTx.id) {
+      setSelectedTransaction(updatedTx);
+    }
+  };
+
   const [monthlyBudget, setMonthlyBudget] = useState<number>(60000); // 60,000 INR default
   const [categoryBudgets, setCategoryBudgets] = useState<Budget[]>([]);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [editingNotes, setEditingNotes] = useState("");
   const [newFlyoutTagInput, setNewFlyoutTagInput] = useState("");
 
+  // Edit fields local states inside flyout
+  const [isEditingTransaction, setIsEditingTransaction] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editAmount, setEditAmount] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editType, setEditType] = useState<"income" | "expense">("expense");
+  const [editCategory, setEditCategory] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editIsRecurring, setEditIsRecurring] = useState(false);
+  const [editCurrency, setEditCurrency] = useState("INR");
+  const [editTags, setEditTags] = useState<string[]>([]);
+
   // Update editing state whenever transaction is selected
   useEffect(() => {
     if (selectedTransaction) {
       setEditingNotes(selectedTransaction.notes || "");
       setNewFlyoutTagInput("");
+      
+      // Initialize edit form values
+      setEditTitle(selectedTransaction.title);
+      setEditAmount(String(selectedTransaction.amount));
+      setEditDate(selectedTransaction.date);
+      setEditType(selectedTransaction.type);
+      setEditCategory(selectedTransaction.category);
+      setEditDescription(selectedTransaction.description || "");
+      setEditIsRecurring(selectedTransaction.isRecurring || false);
+      setEditCurrency(selectedTransaction.currency || "INR");
+      setEditTags(selectedTransaction.tags || []);
+      setIsEditingTransaction(false);
     } else {
       setEditingNotes("");
       setNewFlyoutTagInput("");
+      setIsEditingTransaction(false);
     }
   }, [selectedTransaction]);
 
@@ -930,19 +965,284 @@ export default function App() {
                     {/* Cover Top header */}
                     <div className="p-6 border-b border-white/5 bg-[#050505]/60 flex justify-between items-center">
                       <div>
-                        <span className="text-[10px] font-mono font-bold text-white/45 uppercase tracking-widest block mb-1">AUDIT INSPECT RECORD</span>
-                        <h3 className="text-md font-sans font-bold text-white leading-none">Cash Posting Ledger</h3>
+                        <span className="text-[10px] font-mono font-bold text-white/45 uppercase tracking-widest block mb-1">
+                          {isEditingTransaction ? "MODIFY TRANSACTION RECORD" : "AUDIT INSPECT RECORD"}
+                        </span>
+                        <h3 className="text-md font-sans font-bold text-white leading-none">
+                          {isEditingTransaction ? "Edit Transaction Form" : "Cash Posting Ledger"}
+                        </h3>
                       </div>
-                      <button 
-                        onClick={() => setSelectedTransaction(null)}
-                        className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-white/60 hover:text-white transition-all cursor-pointer"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {!isEditingTransaction && (
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              // Initialize and trigger edit mode
+                              setEditTitle(selectedTransaction.title);
+                              setEditAmount(String(selectedTransaction.amount));
+                              setEditDate(selectedTransaction.date);
+                              setEditType(selectedTransaction.type);
+                              setEditCategory(selectedTransaction.category);
+                              setEditDescription(selectedTransaction.description || "");
+                              setEditIsRecurring(selectedTransaction.isRecurring || false);
+                              setEditCurrency(selectedTransaction.currency || "INR");
+                              setEditTags(selectedTransaction.tags || []);
+                              setIsEditingTransaction(true);
+                            }}
+                            title="Edit Details"
+                            className="p-1.5 rounded-xl bg-cyan-950/40 text-[#00F5FF] hover:bg-cyan-900 border border-cyan-400/30 transition-all cursor-pointer flex items-center gap-1 text-xs font-mono font-bold"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" /> EDIT DETAILS
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => setSelectedTransaction(null)}
+                          className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-white/60 hover:text-white transition-all cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Core detail summary */}
-                    <div className="p-8 flex-1 space-y-6 overflow-y-auto">
+                    {isEditingTransaction ? (
+                      <div className="p-8 flex-1 space-y-5 overflow-y-auto">
+                        {/* Transaction Type Selector Toggle */}
+                        <div className="space-y-1.5">
+                          <label className="text-[9px] font-mono font-bold text-[#00F5FF] uppercase tracking-widest block font-bold">Transaction Type</label>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditType("income");
+                                setEditCategory("Income");
+                              }}
+                              className={`flex-1 py-3 text-center rounded-2xl font-mono text-[10px] font-bold border cursor-pointer select-none transition-all flex items-center justify-center gap-2 ${
+                                editType === 'income' 
+                                  ? 'bg-cyan-950/40 border-cyan-400 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.1)]' 
+                                  : 'bg-black border-white/5 text-white/30 hover:bg-white/[0.02]'
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${editType === 'income' ? 'bg-[#00F5FF]' : 'bg-white/20'}`} />
+                              INCOME DEPOSIT
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditType("expense");
+                                if (editCategory === "Income") {
+                                  setEditCategory("Food & Dining");
+                                }
+                              }}
+                              className={`flex-1 py-3 text-center rounded-2xl font-mono text-[10px] font-bold border cursor-pointer select-none transition-all flex items-center justify-center gap-2 ${
+                                editType === 'expense' 
+                                  ? 'bg-white/10 border-white/20 text-white' 
+                                  : 'bg-black border-white/5 text-white/30 hover:bg-white/[0.02]'
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${editType === 'expense' ? 'bg-rose-400' : 'bg-white/20'}`} />
+                              OUTFLOW EXPENSE
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Title input */}
+                        <div className="space-y-1.5">
+                          <label className="text-[9px] font-mono font-bold text-white/40 uppercase tracking-widest block font-bold">Transaction Title</label>
+                          <input 
+                            type="text"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            placeholder="Enter posting title (e.g., Grocery Supermarket)..."
+                            className="w-full bg-black border border-white/10 rounded-2xl px-4 py-3 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400 focus:shadow-[0_0_15px_rgba(6,182,212,0.05)] transition-all font-sans"
+                          />
+                        </div>
+
+                        {/* Amount & Currency */}
+                        <div className="grid grid-cols-3 gap-3 font-mono">
+                          <div className="col-span-2 space-y-1.5">
+                            <label className="text-[9px] font-mono font-bold text-white/40 uppercase tracking-widest block font-bold">Ledger value amount</label>
+                            <div className="relative">
+                              <input 
+                                type="number"
+                                step="any"
+                                value={editAmount}
+                                onChange={(e) => setEditAmount(e.target.value)}
+                                placeholder="0.00"
+                                className="w-full bg-black border border-white/10 rounded-2xl pl-4 pr-12 py-3 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400 transition-all font-mono"
+                              />
+                              <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold text-white/45">
+                                {editCurrency}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[9px] font-mono font-bold text-white/40 uppercase tracking-widest block font-bold">Post currency</label>
+                            <select
+                              value={editCurrency}
+                              onChange={(e) => setEditCurrency(e.target.value)}
+                              className="w-full h-[42px] bg-black border border-white/10 rounded-2xl px-3 text-xs text-white font-mono focus:outline-none focus:border-cyan-400 transition-all cursor-pointer"
+                            >
+                              {CURRENCIES.map(curr => (
+                                <option key={curr.code} value={curr.code}>{curr.code}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Category Selector */}
+                        <div className="space-y-1.5">
+                          <label className="text-[9px] font-mono font-bold text-white/40 uppercase tracking-widest block font-bold">Posting Channel Category</label>
+                          <select
+                            value={editCategory}
+                            onChange={(e) => setEditCategory(e.target.value)}
+                            className="w-full bg-black border border-white/10 rounded-2xl px-4 py-3 text-xs text-white focus:outline-none focus:border-cyan-400 transition-all cursor-pointer font-sans"
+                          >
+                            {CATEGORIES.filter(cat => editType === "income" ? cat.isIncome : !cat.isIncome).map(cat => (
+                              <option key={cat.id} value={cat.id}>{cat.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Date Picker */}
+                        <div className="space-y-1.5">
+                          <label className="text-[9px] font-mono font-bold text-white/40 uppercase tracking-widest block font-bold">Transaction Posting Date</label>
+                          <input 
+                            type="date"
+                            value={editDate}
+                            onChange={(e) => setEditDate(e.target.value)}
+                            className="w-full bg-black border border-white/10 rounded-2xl px-4 py-3 text-xs text-white font-mono focus:outline-none focus:border-cyan-400 transition-all cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Description */}
+                        <div className="space-y-1.5">
+                          <label className="text-[9px] font-mono font-bold text-white/40 uppercase tracking-widest block font-bold">Supplemental remarks description</label>
+                          <input 
+                            type="text"
+                            value={editDescription}
+                            onChange={(e) => setEditDescription(e.target.value)}
+                            placeholder="Add brief description or payment method..."
+                            className="w-full bg-black border border-white/10 rounded-2xl px-4 py-3 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400 transition-all font-sans"
+                          />
+                        </div>
+
+                        {/* Tags Editor */}
+                        <div className="space-y-3 pt-3 border-t border-white/5">
+                          <div className="flex justify-between items-center">
+                            <h4 className="text-[10px] font-mono uppercase font-bold text-[#00F5FF]">Transaction Tags</h4>
+                            <span className="text-[8px] font-mono text-white/30 uppercase">Enterprise metadata tagging</span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5 min-h-[24px]">
+                            {editTags.length > 0 ? (
+                              editTags.map(tag => (
+                                <span 
+                                  key={tag}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#00F5FF]/10 border border-[#00F5FF]/15 text-[#00F5FF] text-[9px] font-mono uppercase font-bold animate-fadeIn"
+                                >
+                                  #{tag}
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditTags(editTags.filter(t => t !== tag))}
+                                    className="p-0.5 rounded hover:bg-[#00F5FF] hover:text-black transition-all cursor-pointer"
+                                    title="Remove Tag"
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-white/30 font-mono text-[10px] italic">No active tags attached.</span>
+                            )}
+                          </div>
+
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-mono text-white/30 block uppercase font-bold">TAGS LIBRARY TOGGLES</span>
+                            <div className="flex flex-wrap gap-1 bg-black/40 border border-white/5 rounded-xl p-2 max-h-20 overflow-y-auto font-mono">
+                              {availableTags.map((tag) => {
+                                const hasTag = editTags.includes(tag);
+                                return (
+                                  <button
+                                    key={tag}
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = hasTag
+                                        ? editTags.filter((t) => t !== tag)
+                                        : [...editTags, tag];
+                                      setEditTags(updated);
+                                    }}
+                                    className={`px-2 py-0.5 rounded-md text-[9px] font-mono transition-all flex items-center gap-1 cursor-pointer select-none ${
+                                      hasTag
+                                        ? "bg-[#00F5FF]/20 text-[#00F5FF] border border-[#00F5FF]/30"
+                                        : "bg-white/[0.01] border border-white/5 text-white/30 hover:bg-white/[0.04]"
+                                    }`}
+                                  >
+                                    <Tag className="w-2 h-2" />
+                                    {tag}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 font-sans">
+                            <input 
+                              type="text"
+                              placeholder="Create custom tag and attach..."
+                              value={newFlyoutTagInput}
+                              onChange={(e) => setNewFlyoutTagInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  const val = newFlyoutTagInput.trim();
+                                  if (val) {
+                                    handleCreateTag(val);
+                                    if (!editTags.includes(val)) {
+                                      setEditTags([...editTags, val]);
+                                    }
+                                    setNewFlyoutTagInput("");
+                                  }
+                                }
+                              }}
+                              className="flex-1 bg-black border border-white/5 rounded-xl px-3 py-2 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-400/50 transition-all font-sans"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const val = newFlyoutTagInput.trim();
+                                if (val) {
+                                  handleCreateTag(val);
+                                  if (!editTags.includes(val)) {
+                                    setEditTags([...editTags, val]);
+                                  }
+                                  setNewFlyoutTagInput("");
+                                }
+                              }}
+                              className="px-3 py-2 bg-[#00F5FF] hover:bg-cyan-400 text-black text-[10px] font-mono uppercase font-bold border border-transparent rounded-xl transition duration-300 cursor-pointer"
+                            >
+                              Add Tag
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Cycle setting toggle */}
+                        <div className="flex items-center justify-between p-3.5 bg-white/[0.01] border border-white/5 rounded-2xl">
+                          <div>
+                            <span className="text-xs text-white/85 font-sans font-semibold">Recurring Cycle</span>
+                            <span className="block text-[8px] text-white/40 font-mono uppercase font-bold">POSTS ON A MONTHLY RECURRENCE SPEED</span>
+                          </div>
+                          <input 
+                            type="checkbox"
+                            checked={editIsRecurring}
+                            onChange={(e) => setEditIsRecurring(e.target.checked)}
+                            className="w-4 h-4 rounded border-white/10 bg-black text-[#00F5FF] focus:ring-0 cursor-pointer"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-8 flex-1 space-y-6 overflow-y-auto">
                       <div className="text-center space-y-4">
                         <div className="inline-flex justify-center mb-1">
                           {(() => {
@@ -1165,19 +1465,65 @@ export default function App() {
                         />
                       </div>
                     </div>
+                  )}
 
-                    {/* Delete Posting controls and Actions */}
-                    <div className="p-6 border-t border-white/5 bg-white/[0.01] space-y-2">
-                      <button 
-                        onClick={() => handleDeleteTransaction(selectedTransaction.id)}
-                        className="w-full py-3.5 rounded-2xl bg-red-500/10 border border-red-500/15 hover:bg-red-500 hover:text-white hover:border-transparent text-red-400 text-xs font-mono font-bold uppercase transition flex items-center justify-center gap-2 shadow cursor-pointer"
-                      >
-                        <Trash2 className="w-4.5 h-4.5" /> ERASE AND DELETE POSTING
-                      </button>
-                      <p className="text-[9px] text-center text-white/30 font-mono">
-                        * ERASURE IS PERMANENT • REMOVES ACCOUNT RATIO BALANCE CALCS
-                      </p>
-                    </div>
+                    {/* Delete / Save footer panel actions */}
+                    {isEditingTransaction ? (
+                      <div className="p-6 border-t border-white/5 bg-white/[0.01] flex gap-3">
+                        <button 
+                          type="button"
+                          onClick={() => setIsEditingTransaction(false)}
+                          className="flex-1 py-3.5 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-white/75 hover:text-white text-xs font-mono font-bold uppercase transition cursor-pointer select-none"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            const amountNum = parseFloat(editAmount);
+                            if (isNaN(amountNum) || amountNum <= 0) {
+                              alert("Please enter a valid positive transaction amount.");
+                              return;
+                            }
+                            if (!editTitle.trim()) {
+                              alert("Please enter a title for the transaction.");
+                              return;
+                            }
+
+                            const updatedTx: Transaction = {
+                              ...selectedTransaction,
+                              title: editTitle.trim(),
+                              amount: amountNum,
+                              date: editDate,
+                              type: editType,
+                              category: editCategory,
+                              description: editDescription.trim() || undefined,
+                              isRecurring: editIsRecurring,
+                              currency: editCurrency,
+                              tags: editTags
+                            };
+
+                            handleUpdateTransaction(updatedTx);
+                            setIsEditingTransaction(false);
+                          }}
+                          className="flex-1 py-3.5 rounded-2xl bg-[#00F5FF] hover:bg-cyan-400 text-black text-xs font-mono font-bold uppercase transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer select-none"
+                        >
+                          <Check className="w-4 h-4 font-extrabold" /> Save Changes
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="p-6 border-t border-white/5 bg-white/[0.01] space-y-2">
+                        <button 
+                          onClick={() => handleDeleteTransaction(selectedTransaction.id)}
+                          className="w-full py-3.5 rounded-2xl bg-red-500/10 border border-red-500/15 hover:bg-red-500 hover:text-white hover:border-transparent text-red-400 text-xs font-mono font-bold uppercase transition flex items-center justify-center gap-2 shadow cursor-pointer"
+                        >
+                          <Trash2 className="w-4.5 h-4.5" /> ERASE AND DELETE POSTING
+                        </button>
+                        <p className="text-[9px] text-center text-white/30 font-mono">
+                          * ERASURE IS PERMANENT • REMOVES ACCOUNT RATIO BALANCE CALCS
+                        </p>
+                      </div>
+                    )}
 
                   </motion.div>
                 </div>

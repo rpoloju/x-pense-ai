@@ -1,5 +1,15 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { motion } from "motion/react";
+import { 
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Cell
+} from "recharts";
 import { 
   DollarSign, 
   TrendingUp, 
@@ -14,7 +24,8 @@ import {
   Calendar,
   ChevronRight,
   BrainCircuit,
-  Sparkles
+  Sparkles,
+  BarChart3
 } from "lucide-react";
 import { Transaction, CategorySpec } from "../types";
 import { CATEGORIES } from "../data";
@@ -39,6 +50,65 @@ export function Dashboard({
   onSelectTransaction 
 }: DashboardProps) {
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
+
+  // Group expenses by calendar month of a selected year
+  const [selectedAnalyticsYear, setSelectedAnalyticsYear] = useState<number>(() => {
+    return new Date().getFullYear();
+  });
+
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    transactions.forEach(t => {
+      const y = new Date(t.date).getFullYear();
+      if (!isNaN(y)) {
+        yearsSet.add(y);
+      }
+    });
+    if (yearsSet.size === 0) {
+      yearsSet.add(new Date().getFullYear());
+    }
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [transactions]);
+
+  // Set default selected analytics year to the latest available year
+  useEffect(() => {
+    if (!availableYears.includes(selectedAnalyticsYear) && availableYears.length > 0) {
+      setSelectedAnalyticsYear(availableYears[0]);
+    }
+  }, [availableYears, selectedAnalyticsYear]);
+
+  // Monthly aggregated expenses data for the selected year
+  const monthlyExpensesChartData = useMemo(() => {
+    const monthsData = Array.from({ length: 12 }, (_, index) => {
+      const monthNames = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+      ];
+      return {
+        month: monthNames[index],
+        monthIndex: index,
+        expense: 0,
+        income: 0
+      };
+    });
+
+    transactions.forEach(t => {
+      const d = new Date(t.date);
+      const y = d.getFullYear();
+      const m = d.getMonth();
+      
+      if (y === selectedAnalyticsYear && !isNaN(m)) {
+        const amountInDisplay = convertAmount(t.amount, t.currency || "INR", displayCurrency, exchangeRates);
+        if (t.type === "expense") {
+          monthsData[m].expense += amountInDisplay;
+        } else {
+          monthsData[m].income += amountInDisplay;
+        }
+      }
+    });
+
+    return monthsData;
+  }, [transactions, selectedAnalyticsYear, displayCurrency, exchangeRates]);
 
   // Parse financials to the user chosen active displayCurrency
   const stats = useMemo(() => {
@@ -470,6 +540,123 @@ export function Dashboard({
                 </div>
               );
             })}
+          </div>
+        </div>
+      </div>
+
+      {/* ANNUAL MONTHLY EXPENSES BAR CHART PANEL */}
+      <div className="bg-white/[0.03] p-6 rounded-[32px] border border-white/5 space-y-5 shadow-xl">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-white/5">
+          <div>
+            <h3 className="text-md font-sans font-bold text-white flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-cyan-400" />
+              Annual Treasury Analytics
+            </h3>
+            <p className="text-xs text-white/40 font-mono uppercase tracking-wider mt-0.5">
+              Monthly cash flow comparison of inflow deposits vs outflow drains
+            </p>
+          </div>
+          
+          {/* Year selector */}
+          <div className="flex items-center gap-2 self-start sm:self-auto font-mono">
+            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">Accounting Year:</span>
+            <select
+              value={selectedAnalyticsYear}
+              onChange={(e) => setSelectedAnalyticsYear(Number(e.target.value))}
+              className="bg-black border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00F5FF]/50 transition-all cursor-pointer font-bold"
+            >
+              {availableYears.map(year => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="w-full pt-2">
+          {/* Chart Wrapper with responsive container */}
+          <div className="h-[280px] w-full relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={monthlyExpensesChartData}
+                margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
+                <XAxis 
+                  dataKey="month" 
+                  stroke="rgba(255, 255, 255, 0.3)" 
+                  fontSize={10} 
+                  tickLine={false}
+                  axisLine={false}
+                  className="font-mono"
+                />
+                <YAxis 
+                  stroke="rgba(255, 255, 255, 0.3)" 
+                  fontSize={10} 
+                  tickLine={false} 
+                  axisLine={false}
+                  tickFormatter={(val) => {
+                    if (val >= 1e6) return `${(val / 1e6).toFixed(1)}M`;
+                    if (val >= 1e3) return `${(val / 1e3).toFixed(0)}K`;
+                    return String(val);
+                  }}
+                  className="font-mono"
+                />
+                <Tooltip
+                  cursor={{ fill: "rgba(255, 255, 255, 0.02)" }}
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload;
+                      return (
+                        <div className="bg-[#0c0c0c] border border-white/10 p-3 rounded-2xl shadow-xl space-y-1.5 font-mono min-w-[150px]">
+                          <div className="text-[10px] uppercase font-black text-white/45 border-b border-white/5 pb-1 mb-1">
+                            {data.month} {selectedAnalyticsYear}
+                          </div>
+                          <div className="flex justify-between items-center text-xs gap-4">
+                            <span className="text-[#00F5FF] font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#00F5FF]" /> Inflow:
+                            </span>
+                            <span className="text-white font-bold">{formatCurrencyValue(data.income, displayCurrency)}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs gap-4">
+                            <span className="text-red-400 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-400" /> Outgo:
+                            </span>
+                            <span className="text-white font-bold">{formatCurrencyValue(data.expense, displayCurrency)}</span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                />
+                <Bar 
+                  dataKey="income" 
+                  name="Deposits Inflow" 
+                  fill="#00F5FF" 
+                  radius={[4, 4, 0, 0]} 
+                  maxBarSize={14} 
+                />
+                <Bar 
+                  dataKey="expense" 
+                  name="Outflow Drain" 
+                  fill="#F87171" 
+                  radius={[4, 4, 0, 0]} 
+                  maxBarSize={14} 
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Legend display */}
+        <div className="flex justify-center gap-6 pt-1">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#00F5FF] shadow-[0_0_8px_rgba(6,182,212,0.4)]" />
+            <span className="text-[10px] font-mono uppercase font-bold text-white/60">Deposits (Inflow)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.4)]" />
+            <span className="text-[10px] font-mono uppercase font-bold text-white/60">Expenses (Outflow)</span>
           </div>
         </div>
       </div>

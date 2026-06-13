@@ -73,9 +73,21 @@ export function AIAdvisor({ transactions, monthlyBudget, displayCurrency, exchan
         })
       });
 
-      const data = await response.json();
+      let data: any = null;
+      try {
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          data = await response.json();
+        } else {
+          const text = await response.text();
+          throw new Error(text.substring(0, 160) || `Server error ${response.status}`);
+        }
+      } catch (parseErr: any) {
+        throw new Error(`Server returned invalid format: ${parseErr.message}`);
+      }
+
       if (!response.ok) {
-        throw new Error(data.message || data.error || "Suggestions failed to generate");
+        throw new Error(data?.message || data?.error || "Suggestions failed to generate");
       }
       setReport(data);
     } catch (err: any) {
@@ -132,9 +144,21 @@ export function AIAdvisor({ transactions, monthlyBudget, displayCurrency, exchan
         })
       });
 
-      const data = await response.json();
+      let data: any = null;
+      try {
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          data = await response.json();
+        } else {
+          const text = await response.text();
+          throw new Error(text.substring(0, 160) || `Server error ${response.status}`);
+        }
+      } catch (parseErr: any) {
+        throw new Error(`Server returned invalid format: ${parseErr.message}`);
+      }
+
       if (!response.ok) {
-        throw new Error(data.message || data.error || "AI reply failed");
+        throw new Error(data?.message || data?.error || "AI reply failed");
       }
 
       const botMsg: ChatMessage = {
