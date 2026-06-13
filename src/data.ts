@@ -44,11 +44,67 @@ export const CATEGORIES: CategorySpec[] = [
     glowClass: "shadow-cyan-500/20",
   },
   {
+    id: "GROCERY",
+    name: "GROCERY",
+    color: "#10B981", // Emerald
+    icon: "Apple",
+    glowClass: "shadow-emerald-500/20",
+  },
+  {
     id: "Income",
     name: "Income",
     color: "#10B981", // Emerald
     icon: "TrendingUp",
     glowClass: "shadow-emerald-500/20",
+    isIncome: true,
+  },
+  {
+    id: "Rent Inflow",
+    name: "Rent",
+    color: "#22C55E", // Green
+    icon: "Home",
+    glowClass: "shadow-emerald-500/20",
+    isIncome: true,
+  },
+  {
+    id: "Interest",
+    name: "Interest",
+    color: "#3B82F6", // Blue
+    icon: "Percent",
+    glowClass: "shadow-blue-500/20",
+    isIncome: true,
+  },
+  {
+    id: "Cashback",
+    name: "Cashback",
+    color: "#F59E0B", // Amber
+    icon: "Sparkles",
+    glowClass: "shadow-amber-500/20",
+    isIncome: true,
+  },
+  {
+    id: "Refund",
+    name: "Refund",
+    color: "#EC4899", // Pink
+    icon: "RotateCcw",
+    glowClass: "shadow-pink-500/20",
+    isIncome: true,
+  },
+  {
+    id: "Profit",
+    name: "Profit",
+    color: "#10B981", // Emerald
+    icon: "Award",
+    glowClass: "shadow-emerald-500/20",
+    isIncome: true,
+  },
+  {
+    id: "Investment",
+    name: "Investment",
+    color: "#8B5CF6", // Purple
+    icon: "Briefcase",
+    glowClass: "shadow-purple-500/20",
+    isIncome: true,
   },
   {
     id: "Other",
@@ -56,6 +112,13 @@ export const CATEGORIES: CategorySpec[] = [
     color: "#6B7280", // Gray
     icon: "Layers",
     glowClass: "shadow-gray-500/20",
+  },
+  {
+    id: "Unknown",
+    name: "Unknown / Uncategorized",
+    color: "#F43F5E", // Rose/red
+    icon: "AlertTriangle",
+    glowClass: "shadow-rose-500/20",
   },
 ];
 

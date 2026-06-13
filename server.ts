@@ -197,6 +197,73 @@ app.post("/api/ai/chat", async (req, res) => {
   }
 });
 
+// API: SMS Transaction AI Parser
+app.post("/api/sms/parse", async (req, res) => {
+  try {
+    const { smsText } = req.body;
+    if (!smsText || typeof smsText !== "string") {
+      return res.status(400).json({
+        error: "Missing fields",
+        message: "smsText body parameter is required"
+      });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({
+        error: "Missing API Key",
+        message: "Gemini API key is not configured in the AI Studio Secrets panel. Please navigate to Settings > Secrets to enable real-time SMS Parsing."
+      });
+    }
+
+    const ai = getGeminiClient();
+
+    const prompt = `
+      You are a precise, financial transaction extractor. Analyze the following SMS text and extract transaction details:
+      "${smsText}"
+
+      Output attributes to extract:
+      1. amount: A float/double representing the transacted numerical quantity. (e.g. 350, 145000, 12.50). Remove commas.
+      2. type: Either "expense" (if money was debited, spent, paid, charged, withdrawn, transferred to someone) or "income" (if money was credited, received, deposited, refunded, salary).
+      3. seller: The brief clean name of the merchant, product/service, bank, or person (e.g. "Swiggy", "Netflix", "Amazon", "Starbucks", "Uber", "Employer"). If undefined, return the primary organization/person of the transaction. Keep it under 20 characters.
+      4. currency: The 3-letter currency code (e.g. INR, USD, EUR, GBP, JPY). If not stated, assume "INR".
+
+      You MUST respond strictly in the requested JSON structure. No outer explanation.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          required: ["amount", "type", "seller", "currency"],
+          properties: {
+            amount: { type: Type.NUMBER, description: "numerical amount" },
+            type: { type: Type.STRING, enum: ["expense", "income"] },
+            seller: { type: Type.STRING, description: "clean merchant/seller name" },
+            currency: { type: Type.STRING, description: "3-letter currency abbreviation" }
+          }
+        }
+      }
+    });
+
+    if (!response.text) {
+      throw new Error("No response text from Gemini SMS parser");
+    }
+
+    const extracted = JSON.parse(response.text.trim());
+    return res.json(extracted);
+  } catch (error: any) {
+    console.error("Error in AI SMS Parser API:", error);
+    return res.status(500).json({
+      error: "AI SMS Parse Failed",
+      message: error.message || "An error occurred while parsing the SMS message."
+    });
+  }
+});
+
 // Vite middleware & static serving
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

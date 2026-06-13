@@ -52,4 +52,5 @@ export interface CategorySpec {
   color: string; // Hex or Tailwind color class
   icon: string;  // Name of Lucide icon
   glowClass: string; // Custom glow classes for visual elegance
+  isIncome?: boolean; // True for deposit inflow classification
 }

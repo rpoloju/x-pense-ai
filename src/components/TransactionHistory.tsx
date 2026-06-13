@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Search, 
@@ -71,6 +71,20 @@ export function TransactionHistory({
     currency: displayCurrency
   });
   const [formError, setFormError] = useState("");
+
+  // Reset active category filter on toggle type filter
+  useEffect(() => {
+    if (activeCategoryFilter !== "all") {
+      const selectedCat = CATEGORIES.find(c => c.id === activeCategoryFilter);
+      if (selectedCat) {
+        if (activeTypeFilter === "expense" && selectedCat.isIncome) {
+          setActiveCategoryFilter("all");
+        } else if (activeTypeFilter === "income" && !selectedCat.isIncome) {
+          setActiveCategoryFilter("all");
+        }
+      }
+    }
+  }, [activeTypeFilter, activeCategoryFilter]);
 
   // Process filters
   const processedTransactions = useMemo(() => {
@@ -190,7 +204,7 @@ export function TransactionHistory({
       title: formData.title,
       amount: amt,
       type: formData.type,
-      category: formData.type === "income" ? "Income" : formData.category,
+      category: formData.category,
       date: formData.date,
       description: formData.description.trim() || undefined,
       isRecurring: formData.isRecurring,
@@ -364,16 +378,15 @@ export function TransactionHistory({
           typeVal = "income";
         }
 
-        let categoryVal = "Other";
+        let categoryVal = typeVal === "income" ? "Income" : "Other";
         const categoryStr = categoryColIdx !== -1 && columns[categoryColIdx] ? columns[categoryColIdx].trim() : "";
-        if (typeVal === "income") {
-          categoryVal = "Income";
-        } else if (categoryStr) {
+        if (categoryStr) {
           const matching = CATEGORIES.find(c => 
             c.id.toLowerCase() === categoryStr.toLowerCase() ||
-            c.name.toLowerCase() === categoryStr.toLowerCase()
+            c.name.toLowerCase() === categoryStr.toLowerCase() ||
+            (c.isIncome && typeVal === "income" && c.name.toLowerCase().includes(categoryStr.toLowerCase()))
           );
-          if (matching && matching.id !== "Income") {
+          if (matching) {
             categoryVal = matching.id;
           }
         }
@@ -543,7 +556,11 @@ export function TransactionHistory({
             >
               ALL CATEGORIES
             </button>
-            {CATEGORIES.map(category => (
+            {CATEGORIES.filter(c => {
+              if (activeTypeFilter === "expense") return !c.isIncome;
+              if (activeTypeFilter === "income") return c.isIncome;
+              return true;
+            }).map(category => (
               <button 
                 key={category.id}
                 onClick={() => setActiveCategoryFilter(category.id)}
@@ -788,14 +805,14 @@ export function TransactionHistory({
                   <div className="grid grid-cols-2 p-1 bg-black border border-white/5 rounded-2xl">
                     <button 
                       type="button"
-                      onClick={() => setFormData({ ...formData, type: "expense" })}
+                      onClick={() => setFormData({ ...formData, type: "expense", category: "Food & Dining" })}
                       className={`py-2 rounded-xl text-xs font-mono font-bold tracking-wide transition-all ${formData.type === 'expense' ? 'bg-rose-500/15 text-rose-400 border border-rose-500/25 font-bold shadow' : 'text-white/40 hover:text-white'}`}
                     >
                       CASH OUTFLOW
                     </button>
                     <button 
                       type="button"
-                      onClick={() => setFormData({ ...formData, type: "income" })}
+                      onClick={() => setFormData({ ...formData, type: "income", category: "Income" })}
                       className={`py-2 rounded-xl text-xs font-mono font-bold tracking-wide transition-all ${formData.type === 'income' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold shadow' : 'text-white/40 hover:text-white'}`}
                     >
                       DEPOSIT INFLOW
@@ -850,35 +867,38 @@ export function TransactionHistory({
                   </div>
                 </div>
 
-                {/* Category assignment (only for expenses) */}
-                {formData.type === "expense" && (
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-mono tracking-wider text-white/40 uppercase font-bold">Capital category list</label>
-                    <div className="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto p-1 bg-black border border-white/5 rounded-2xl custom-scrollbar animate-fadeIn">
-                      {CATEGORIES.filter(cat => cat.id !== "Income").map(cat => {
-                        const isSelected = formData.category === cat.id;
-                        return (
-                          <button 
-                            type="button" 
-                            key={cat.id}
-                            onClick={() => setFormData({ ...formData, category: cat.id })}
-                            className={`p-2 rounded-xl text-[10px] font-mono font-bold tracking-wide uppercase transition-all flex items-center justify-between border ${
-                              isSelected 
-                                ? 'bg-white/10 border-white/10 text-white shadow-inner' 
-                                : 'bg-[#0c0c0c]/60 border-white/5 text-white/40 hover:bg-white/5'
-                            }`}
-                          >
-                            <span className="flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
-                              {cat.name}
-                            </span>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400" />}
-                          </button>
-                        );
-                      })}
-                    </div>
+                {/* Category assignment (dynamic based on type) */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono tracking-wider text-white/40 uppercase font-bold">
+                    {formData.type === "expense" ? "Capital category list" : "Deposit categories list"}
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto p-1 bg-black border border-white/5 rounded-2xl custom-scrollbar animate-fadeIn">
+                    {CATEGORIES.filter(cat => {
+                      if (formData.type === "expense") return !cat.isIncome;
+                      return cat.isIncome;
+                    }).map(cat => {
+                      const isSelected = formData.category === cat.id;
+                      return (
+                        <button 
+                          type="button" 
+                          key={cat.id}
+                          onClick={() => setFormData({ ...formData, category: cat.id })}
+                          className={`p-2 rounded-xl text-[10px] font-mono font-bold tracking-wide uppercase transition-all flex items-center justify-between border ${
+                            isSelected 
+                              ? 'bg-white/10 border-white/10 text-white shadow-inner' 
+                              : 'bg-[#0c0c0c]/60 border-white/5 text-white/40 hover:bg-white/5'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
+                            {cat.name}
+                          </span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400" />}
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
+                </div>
 
                 {/* Recurring toggle */}
                 <div className="flex items-center justify-between p-3.5 bg-black border border-white/5 rounded-2xl">

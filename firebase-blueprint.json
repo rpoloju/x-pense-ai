@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile containing personal configurations and security budgets",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "profilePic": {
+          "type": "string"
+        },
+        "monthlyBudget": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "userId"
+      ]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Ledger financial debit and credit posting items",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "income",
+            "expense"
+          ]
+        },
+        "category": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "isRecurring": {
+          "type": "boolean"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "amount",
+        "type",
+        "category",
+        "date"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Details and configs of authenticated client"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Individual cash flows and allocations"
+    }
+  }
+}

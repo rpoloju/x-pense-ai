@@ -87,7 +87,7 @@ export function Dashboard({
 
   // Donut chart segments calculation
   const chartData = useMemo(() => {
-    const categoriesWithExpense = CATEGORIES.filter(cat => cat.id !== "Income" && (stats.expensesByCategory[cat.id] || 0) > 0);
+    const categoriesWithExpense = CATEGORIES.filter(cat => !cat.isIncome && (stats.expensesByCategory[cat.id] || 0) > 0);
     const totalExpense = stats.expense || 1; // Prevent division by zero
     
     let cumulativePercent = 0;
@@ -422,7 +422,7 @@ export function Dashboard({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
-            {CATEGORIES.filter(cat => cat.id !== "Income").map(cat => {
+            {CATEGORIES.filter(cat => !cat.isIncome).map(cat => {
               const spent = stats.expensesByCategory[cat.id] || 0;
               const isHovered = hoveredCategory === cat.id;
 

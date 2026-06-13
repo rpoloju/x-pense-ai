@@ -35,8 +35,82 @@ type CalculatorType =
   | "compound" 
   | "tax";
 
+interface CompactInputProps {
+  label: string;
+  value: number;
+  onChange: (val: number) => void;
+  prefix?: string;
+  suffix?: string;
+  step?: number;
+  min?: number;
+  max?: number;
+  isCurrency?: boolean;
+  currencyCode?: string;
+}
+
+function CompactInput({
+  label,
+  value,
+  onChange,
+  prefix,
+  suffix,
+  step = 1,
+  min = 0,
+  max = Infinity,
+  isCurrency = false,
+  currencyCode = "INR"
+}: CompactInputProps) {
+  const formattedPreview = useMemo(() => {
+    if (value === 0) return "";
+    if (isCurrency) {
+      if (currencyCode === "INR") {
+        return "₹" + Math.round(value).toLocaleString("en-IN");
+      } else {
+        const spec = CURRENCIES.find(c => c.code.toUpperCase() === currencyCode.toUpperCase()) || { symbol: "$" };
+        return spec.symbol + Math.round(value).toLocaleString();
+      }
+    }
+    return Math.round(value).toLocaleString();
+  }, [value, isCurrency, currencyCode]);
+
+  return (
+    <div className="space-y-1 text-left">
+      <div className="flex justify-between items-center px-1">
+        <label className="text-[10px] font-mono font-black text-white/40 uppercase tracking-widest">{label}</label>
+        {formattedPreview && (
+          <span className="text-[10px] font-mono text-[#00F5FF]/60 font-semibold">
+            {formattedPreview} {suffix && !isCurrency ? suffix : ""}
+          </span>
+        )}
+      </div>
+      <div className="relative flex items-center bg-white/[0.012] border border-white/5 focus-within:border-[#00F5FF]/45 rounded-2xl px-3.5 transition-all w-full">
+        {prefix && <span className="text-[11px] font-mono text-white/30 mr-2 shrink-0 select-none">{prefix}</span>}
+        <input
+          type="number"
+          inputMode="decimal"
+          value={value === 0 ? "" : value}
+          onChange={(e) => {
+            const val = e.target.value === "" ? 0 : Number(e.target.value);
+            onChange(val);
+          }}
+          step={step}
+          min={min}
+          max={max}
+          className="w-full bg-transparent text-xs font-mono font-bold text-white focus:outline-none py-2.5 placeholder-white/20 select-all font-sans"
+          placeholder="0"
+        />
+        {suffix && <span className="text-[10px] font-mono text-[#00F5FF]/80 ml-2 shrink-0 select-none">{suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function FinancialCalculators({ displayCurrency, exchangeRates }: FinancialCalculatorsProps) {
   const [activeCalc, setActiveCalc] = useState<CalculatorType>("fire");
+
+  const curSymbol = useMemo(() => {
+    return CURRENCIES.find(c => c.code.toUpperCase() === displayCurrency.toUpperCase())?.symbol || "$";
+  }, [displayCurrency]);
 
   // Calculators definitions
   const calculators = [
@@ -758,113 +832,81 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <Hourglass className="w-5 h-5 text-cyan-500 animate-pulse" />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
-                    {/* Input sliders */}
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Current Age</span>
-                          <span className="text-[#00F5FF]">{fireCurrentAge} Years</span>
-                        </div>
-                        <input 
-                          type="range" min="18" max={fireRetireAge - 1} value={fireCurrentAge} 
-                          onChange={(e) => setFireCurrentAge(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
-                      
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Target Retirement Age</span>
-                          <span className="text-[#00F5FF]">{fireRetireAge} Years</span>
-                        </div>
-                        <input 
-                          type="range" min={fireCurrentAge + 1} max="75" value={fireRetireAge} 
-                          onChange={(e) => setFireRetireAge(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CompactInput
+                      label="Current Age"
+                      value={fireCurrentAge}
+                      onChange={setFireCurrentAge}
+                      suffix="yrs"
+                      min={18}
+                      max={Math.max(18, fireRetireAge - 1)}
+                    />
+                    
+                    <CompactInput
+                      label="Target Retirement Age"
+                      value={fireRetireAge}
+                      onChange={setFireRetireAge}
+                      suffix="yrs"
+                      min={fireCurrentAge + 1}
+                      max={75}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Life Expectancy</span>
-                          <span className="text-[#00F5FF]">{fireLifeExpectancy} Years</span>
-                        </div>
-                        <input 
-                          type="range" min={fireRetireAge + 5} max="100" value={fireLifeExpectancy} 
-                          onChange={(e) => setFireLifeExpectancy(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
+                    <CompactInput
+                      label="Life Expectancy"
+                      value={fireLifeExpectancy}
+                      onChange={setFireLifeExpectancy}
+                      suffix="yrs"
+                      min={fireRetireAge + 5}
+                      max={100}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Current Monthly Expenses</span>
-                          <span className="text-[#00F5FF]">{formatCurrencyValue(fireMonthlyExpense, displayCurrency)}</span>
-                        </div>
-                        <div className="relative flex items-center">
-                          <span className="absolute left-3 text-[10px] font-mono text-white/30">{displayCurrency}</span>
-                          <input 
-                            type="number" value={fireMonthlyExpense} 
-                            onChange={(e) => setFireMonthlyExpense(Math.max(0, Number(e.target.value)))}
-                            className="w-full bg-black/50 border border-white/5 rounded-xl pl-12 pr-4 py-2 text-xs text-white"
-                          />
-                        </div>
-                      </div>
-                    </div>
+                    <CompactInput
+                      label="Current Monthly Expenses"
+                      value={fireMonthlyExpense}
+                      onChange={setFireMonthlyExpense}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
 
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Expected Inflation Rate</span>
-                          <span className="text-[#00F5FF]">{fireInflation}% / year</span>
-                        </div>
-                        <input 
-                          type="range" min="1" max="15" step="0.5" value={fireInflation} 
-                          onChange={(e) => setFireInflation(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
+                    <CompactInput
+                      label="Expected Inflation Rate"
+                      value={fireInflation}
+                      onChange={setFireInflation}
+                      suffix="% p.a."
+                      step={0.1}
+                      min={1}
+                      max={15}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Equities Yield (Pre-Retirement)</span>
-                          <span className="text-[#00F5FF]">{firePreReturn}%</span>
-                        </div>
-                        <input 
-                          type="range" min="4" max="25" step="0.5" value={firePreReturn} 
-                          onChange={(e) => setFirePreReturn(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
+                    <CompactInput
+                      label="Equities Yield (Pre-Retirement)"
+                      value={firePreReturn}
+                      onChange={setFirePreReturn}
+                      suffix="% p.a."
+                      step={0.1}
+                      min={4}
+                      max={25}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Post-Retirement Safe Yield</span>
-                          <span className="text-[#00F5FF]">{firePostReturn}%</span>
-                        </div>
-                        <input 
-                          type="range" min="3" max="15" step="0.5" value={firePostReturn} 
-                          onChange={(e) => setFirePostReturn(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
+                    <CompactInput
+                      label="Post-Retirement Safe Yield"
+                      value={firePostReturn}
+                      onChange={setFirePostReturn}
+                      suffix="% p.a."
+                      step={0.1}
+                      min={3}
+                      max={15}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Current Portfolio Balance</span>
-                          <span className="text-[#00F5FF]">{formatCurrencyValue(fireCurrentPortfolio, displayCurrency)}</span>
-                        </div>
-                        <div className="relative flex items-center">
-                          <span className="absolute left-3 text-[10px] font-mono text-white/30">{displayCurrency}</span>
-                          <input 
-                            type="number" value={fireCurrentPortfolio} 
-                            onChange={(e) => setFireCurrentPortfolio(Math.max(0, Number(e.target.value)))}
-                            className="w-full bg-black/50 border border-white/5 rounded-xl pl-12 pr-4 py-2 text-xs text-white"
-                          />
-                        </div>
-                      </div>
-                    </div>
+                    <CompactInput
+                      label="Current Portfolio Balance"
+                      value={fireCurrentPortfolio}
+                      onChange={setFireCurrentPortfolio}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
                   </div>
                 </div>
 
@@ -992,63 +1034,34 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <TrendingUp className="w-5 h-5 text-cyan-500" />
                   </div>
 
-                  <div className="space-y-5">
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Monthly Investment</span>
-                        <span className="text-[#00F5FF]">{formatCurrencyValue(sipMonthly, displayCurrency)}</span>
-                      </div>
-                      <div className="flex gap-4">
-                        <input 
-                          type="range" min="500" max="100000" step="500" value={sipMonthly} 
-                          onChange={(e) => setSipMonthly(Number(e.target.value))}
-                          className="flex-1 accent-[#00F5FF] cursor-pointer"
-                        />
-                        <input 
-                          type="number" value={sipMonthly} 
-                          onChange={(e) => setSipMonthly(Math.max(0, Number(e.target.value)))}
-                          className="w-24 bg-black/50 border border-white/5 rounded-xl px-2.5 py-1 text-xs text-white font-mono"
-                        />
-                      </div>
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <CompactInput
+                      label="Monthly Investment"
+                      value={sipMonthly}
+                      onChange={setSipMonthly}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
+                    
+                    <CompactInput
+                      label="Expected Return Rate"
+                      value={sipRate}
+                      onChange={setSipRate}
+                      suffix="% p.a."
+                      step={0.1}
+                      min={1}
+                      max={30}
+                    />
 
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Expected Return Rate (p.a.)</span>
-                        <span className="text-[#00F5FF]">{sipRate}%</span>
-                      </div>
-                      <div className="flex gap-4">
-                        <input 
-                          type="range" min="1" max="25" step="0.5" value={sipRate} 
-                          onChange={(e) => setSipRate(Number(e.target.value))}
-                          className="flex-1 accent-[#00F5FF] cursor-pointer"
-                        />
-                        <input 
-                          type="number" step="any" value={sipRate} 
-                          onChange={(e) => setSipRate(Math.max(0, Number(e.target.value)))}
-                          className="w-21 bg-black/50 border border-white/5 rounded-xl px-2.5 py-1 text-xs text-white font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Time Horizon (Years)</span>
-                        <span className="text-[#00F5FF]">{sipYears} Years</span>
-                      </div>
-                      <div className="flex gap-4">
-                        <input 
-                          type="range" min="1" max="40" value={sipYears} 
-                          onChange={(e) => setSipYears(Number(e.target.value))}
-                          className="flex-1 accent-[#00F5FF] cursor-pointer"
-                        />
-                        <input 
-                          type="number" value={sipYears} 
-                          onChange={(e) => setSipYears(Math.max(1, Number(e.target.value)))}
-                          className="w-21 bg-black/50 border border-white/5 rounded-xl px-2.5 py-1 text-xs text-white font-mono"
-                        />
-                      </div>
-                    </div>
+                    <CompactInput
+                      label="Time Horizon"
+                      value={sipYears}
+                      onChange={setSipYears}
+                      suffix="Years"
+                      min={1}
+                      max={50}
+                    />
                   </div>
                 </div>
 
@@ -1111,56 +1124,43 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <ArrowUpRight className="w-5 h-5 text-[#00F5FF]" />
                   </div>
 
-                  <div className="space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Initial Monthly Installment</span>
-                          <span className="text-[#00F5FF]">{formatCurrencyValue(stepupMonthly, displayCurrency)}</span>
-                        </div>
-                        <input 
-                          type="range" min="1000" max="100000" step="1000" value={stepupMonthly} 
-                          onChange={(e) => setStepupMonthly(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CompactInput
+                      label="Initial Monthly Installment"
+                      value={stepupMonthly}
+                      onChange={setStepupMonthly}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
+                    
+                    <CompactInput
+                      label="Annual Step-up Increment"
+                      value={stepupPercentage}
+                      onChange={setStepupPercentage}
+                      suffix="% every year"
+                      min={1}
+                      max={100}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Annual Step-up Increment</span>
-                          <span className="text-[#00F5FF]">{stepupPercentage}% every year</span>
-                        </div>
-                        <input 
-                          type="range" min="1" max="50" value={stepupPercentage} 
-                          onChange={(e) => setStepupPercentage(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
+                    <CompactInput
+                      label="Expected Return Rate"
+                      value={stepupRate}
+                      onChange={setStepupRate}
+                      suffix="% p.a."
+                      step={0.1}
+                      min={1}
+                      max={30}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Expected Return Rate (p.a.)</span>
-                          <span className="text-[#00F5FF]">{stepupRate}%</span>
-                        </div>
-                        <input 
-                          type="range" min="1" max="25" step="0.5" value={stepupRate} 
-                          onChange={(e) => setStepupRate(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Duration (Years)</span>
-                          <span className="text-[#00F5FF]">{stepupYears} Years</span>
-                        </div>
-                        <input 
-                          type="range" min="1" max="40" value={stepupYears} 
-                          onChange={(e) => setStepupYears(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
-                    </div>
+                    <CompactInput
+                      label="Duration"
+                      value={stepupYears}
+                      onChange={setStepupYears}
+                      suffix="Years"
+                      min={1}
+                      max={50}
+                    />
                   </div>
                 </div>
 
@@ -1223,63 +1223,43 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <TrendingDown className="w-5 h-5 text-rose-450 animate-pulse" />
                   </div>
 
-                  <div className="space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                      <div className="col-span-2">
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Initial Principal Investment</span>
-                          <span className="text-[#00F5FF]">{formatCurrencyValue(swpInitial, displayCurrency)}</span>
-                        </div>
-                        <div className="flex gap-4">
-                          <input 
-                            type="range" min="100000" max="10000000" step="100000" value={swpInitial} 
-                            onChange={(e) => setSwpInitial(Number(e.target.value))}
-                            className="flex-1 accent-[#00F5FF] cursor-pointer"
-                          />
-                          <input 
-                            type="number" value={swpInitial} 
-                            onChange={(e) => setSwpInitial(Math.max(0, Number(e.target.value)))}
-                            className="w-26 bg-black/50 border border-white/5 rounded-xl px-2 text-xs text-white font-mono"
-                          />
-                        </div>
-                      </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CompactInput
+                      label="Initial Principal Investment"
+                      value={swpInitial}
+                      onChange={setSwpInitial}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
+                    
+                    <CompactInput
+                      label="Monthly Desired Withdrawal"
+                      value={swpWithdrawal}
+                      onChange={setSwpWithdrawal}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Monthly Desired Withdrawal</span>
-                          <span className="text-[#00F5FF]">{formatCurrencyValue(swpWithdrawal, displayCurrency)}</span>
-                        </div>
-                        <input 
-                          type="range" min="1000" max="100000" step="1000" value={swpWithdrawal} 
-                          onChange={(e) => setSwpWithdrawal(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
+                    <CompactInput
+                      label="Annual Expected Return Rate"
+                      value={swpRate}
+                      onChange={setSwpRate}
+                      suffix="% p.a."
+                      step={0.1}
+                      min={1}
+                      max={25}
+                    />
 
-                      <div>
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Annual Expected Return Rate</span>
-                          <span className="text-[#00F5FF]">{swpRate}%</span>
-                        </div>
-                        <input 
-                          type="range" min="1" max="20" step="0.5" value={swpRate} 
-                          onChange={(e) => setSwpRate(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
-
-                      <div className="col-span-2">
-                        <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                          <span>Withdrawal Horizon (Years)</span>
-                          <span className="text-[#00F5FF]">{swpYears} Years</span>
-                        </div>
-                        <input 
-                          type="range" min="1" max="40" value={swpYears} 
-                          onChange={(e) => setSwpYears(Number(e.target.value))}
-                          className="w-full accent-[#00F5FF] cursor-pointer"
-                        />
-                      </div>
-                    </div>
+                    <CompactInput
+                      label="Withdrawal Horizon"
+                      value={swpYears}
+                      onChange={setSwpYears}
+                      suffix="Years"
+                      min={1}
+                      max={50}
+                    />
                   </div>
                 </div>
 
@@ -1345,64 +1325,53 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <Coins className="w-5 h-5 text-amber-500 animate-bounce" />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                    <div className="col-span-2">
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Total Initial Corpus Value</span>
-                        <span className="text-[#00F5FF]">{formatCurrencyValue(swpInflInitial, displayCurrency)}</span>
-                      </div>
-                      <input 
-                        type="range" min="100000" max="10000000" step="100000" value={swpInflInitial} 
-                        onChange={(e) => setSwpInflInitial(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CompactInput
+                      label="Total Initial Corpus Value"
+                      value={swpInflInitial}
+                      onChange={setSwpInflInitial}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
+                    
+                    <CompactInput
+                      label="Base Monthly Desired Cashout"
+                      value={swpInflWithdrawal}
+                      onChange={setSwpInflWithdrawal}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
 
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Base Monthly Desired Cashout</span>
-                        <span className="text-[#00F5FF]">{formatCurrencyValue(swpInflWithdrawal, displayCurrency)}</span>
-                      </div>
-                      <input 
-                        type="range" min="1000" max="100000" step="1000" value={swpInflWithdrawal} 
-                        onChange={(e) => setSwpInflWithdrawal(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                    <CompactInput
+                      label="Inflation Rate (Adjusts cashout)"
+                      value={swpInflInflation}
+                      onChange={setSwpInflInflation}
+                      suffix="% / yr"
+                      step={0.1}
+                      min={1}
+                      max={20}
+                    />
 
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Inflation Rate (Adjusts cashout p.a.)</span>
-                        <span className="text-rose-400">{swpInflInflation}%</span>
-                      </div>
-                      <input 
-                        type="range" min="1" max="15" step="0.5" value={swpInflInflation} 
-                        onChange={(e) => setSwpInflInflation(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                    <CompactInput
+                      label="Portfolio Safe Return Yield"
+                      value={swpInflRate}
+                      onChange={setSwpInflRate}
+                      suffix="% p.a."
+                      step={0.1}
+                      min={1}
+                      max={25}
+                    />
 
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Portfolio Safe Return yield</span>
-                        <span className="text-[#00F5FF]">{swpInflRate}%</span>
-                      </div>
-                      <input 
-                        type="range" min="1" max="20" step="0.5" value={swpInflRate} 
-                        onChange={(e) => setSwpInflRate(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Withdrawal Plan Duration</span>
-                        <span className="text-[#00F5FF]">{swpInflYears} Years</span>
-                      </div>
-                      <input 
-                        type="range" min="1" max="40" value={swpInflYears} 
-                        onChange={(e) => setSwpInflYears(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
+                    <div className="sm:col-span-2">
+                      <CompactInput
+                        label="Withdrawal Plan Duration"
+                        value={swpInflYears}
+                        onChange={setSwpInflYears}
+                        suffix="Years"
+                        min={1}
+                        max={50}
                       />
                     </div>
                   </div>
@@ -1470,42 +1439,32 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <PercentSquare className="w-5 h-5 text-teal-400" />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                    <div className="col-span-2">
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>FD Principal Amount</span>
-                        <span className="text-[#00F5FF]">{formatCurrencyValue(fdPrincipal, displayCurrency)}</span>
-                      </div>
-                      <input 
-                        type="range" min="10000" max="2500000" step="10000" value={fdPrincipal} 
-                        onChange={(e) => setFdPrincipal(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CompactInput
+                      label="FD Principal Amount"
+                      value={fdPrincipal}
+                      onChange={setFdPrincipal}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
+                    
+                    <CompactInput
+                      label="Interest Rate"
+                      value={fdRate}
+                      onChange={setFdRate}
+                      suffix="% p.a."
+                      step={0.05}
+                      min={1}
+                      max={25}
+                    />
 
                     <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Interest Rate (p.a.)</span>
-                        <span className="text-[#00F5FF]">{fdRate}%</span>
-                      </div>
-                      <input 
-                        type="range" min="3" max="15" step="0.1" value={fdRate} 
-                        onChange={(e) => setFdRate(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Compounding Frequency</span>
-                        <span className="text-[#00F5FF]">
-                          {fdCompounding === 12 ? "Monthly" : fdCompounding === 4 ? "Quarterly" : fdCompounding === 2 ? "Half-Yearly" : "Yearly"}
-                        </span>
-                      </div>
+                      <span className="text-[10px] font-mono font-black text-white/40 uppercase tracking-widest block mb-1 px-1">Compounding Frequency</span>
                       <select
                         value={fdCompounding}
                         onChange={(e) => setFdCompounding(Number(e.target.value))}
-                        className="w-full bg-[#0c0c0c] border border-white/10 rounded-2xl px-4.5 py-2 text-xs text-cyan-455 font-mono focus:outline-none cursor-pointer"
+                        className="w-full bg-[#0c0c0c] border border-white/10 hover:border-white/20 focus:border-[#00F5FF]/45 rounded-2xl px-4 py-2.5 text-xs text-white font-mono focus:outline-none cursor-pointer h-[42px] mt-0.5"
                       >
                         <option value={12}>Monthly compounding (12/year)</option>
                         <option value={4}>Quarterly compounding (4/year - Standard)</option>
@@ -1514,17 +1473,14 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                       </select>
                     </div>
 
-                    <div className="col-span-2">
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Tenure (Years)</span>
-                        <span className="text-[#00F5FF]">{fdYears} Years</span>
-                      </div>
-                      <input 
-                        type="range" min="1" max="25" value={fdYears} 
-                        onChange={(e) => setFdYears(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                    <CompactInput
+                      label="Tenure"
+                      value={fdYears}
+                      onChange={setFdYears}
+                      suffix="Years"
+                      min={1}
+                      max={35}
+                    />
                   </div>
                 </div>
 
@@ -1580,42 +1536,34 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <Calendar className="w-5 h-5 text-pink-400" />
                   </div>
 
-                  <div className="space-y-5">
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Monthly Installment deposit</span>
-                        <span className="text-[#00F5FF]">{formatCurrencyValue(rdMonthly, displayCurrency)}</span>
-                      </div>
-                      <input 
-                        type="range" min="500" max="100000" step="500" value={rdMonthly} 
-                        onChange={(e) => setRdMonthly(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <CompactInput
+                      label="Monthly Installment Deposit"
+                      value={rdMonthly}
+                      onChange={setRdMonthly}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
+                    
+                    <CompactInput
+                      label="Interest Rate"
+                      value={rdRate}
+                      onChange={setRdRate}
+                      suffix="% p.a."
+                      step={0.05}
+                      min={1}
+                      max={25}
+                    />
 
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Interest Rate (Compounded Quarterly)</span>
-                        <span className="text-[#00F5FF]">{rdRate}% p.a.</span>
-                      </div>
-                      <input 
-                        type="range" min="3" max="12" step="0.1" value={rdRate} 
-                        onChange={(e) => setRdRate(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Duration tenure</span>
-                        <span className="text-[#00F5FF]">{rdYears} Years</span>
-                      </div>
-                      <input 
-                        type="range" min="1" max="15" value={rdYears} 
-                        onChange={(e) => setRdYears(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                    <CompactInput
+                      label="Duration Tenure"
+                      value={rdYears}
+                      onChange={setRdYears}
+                      suffix="Years"
+                      min={1}
+                      max={30}
+                    />
                   </div>
                 </div>
 
@@ -1675,52 +1623,41 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <Percent className="w-5 h-5 text-indigo-400" />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Initial Principal</span>
-                        <span className="text-[#00F5FF]">{formatCurrencyValue(ciPrincipal, displayCurrency)}</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="1000000" step="5000" value={ciPrincipal} 
-                        onChange={(e) => setCiPrincipal(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CompactInput
+                      label="Initial Principal Pool"
+                      value={ciPrincipal}
+                      onChange={setCiPrincipal}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
+                    
+                    <CompactInput
+                      label="Monthly Top-up Contribution"
+                      value={ciMonthly}
+                      onChange={setCiMonthly}
+                      prefix={curSymbol}
+                      isCurrency={true}
+                      currencyCode={displayCurrency}
+                    />
+
+                    <CompactInput
+                      label="Interest Rate Yield"
+                      value={ciRate}
+                      onChange={setCiRate}
+                      suffix="% p.a."
+                      step={0.1}
+                      min={1}
+                      max={40}
+                    />
 
                     <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Monthly Top-up Contribution</span>
-                        <span className="text-[#00F5FF]">{formatCurrencyValue(ciMonthly, displayCurrency)}</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="100000" step="500" value={ciMonthly} 
-                        onChange={(e) => setCiMonthly(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Interest Rate Yield (p.a.)</span>
-                        <span className="text-[#00F5FF]">{ciRate}%</span>
-                      </div>
-                      <input 
-                        type="range" min="1" max="25" step="0.25" value={ciRate} 
-                        onChange={(e) => setCiRate(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Compounding Frequency</span>
-                        <span className="text-[#00F5FF]">{ciCompounding === 365 ? "Daily" : ciCompounding === 12 ? "Monthly" : ciCompounding === 4 ? "Quarterly" : "Yearly"}</span>
-                      </div>
+                      <span className="text-[10px] font-mono font-black text-white/40 uppercase tracking-widest block mb-1 px-1">Compounding Frequency</span>
                       <select
                         value={ciCompounding}
                         onChange={(e) => setCiCompounding(Number(e.target.value))}
-                        className="w-full bg-[#0c0c0c] border border-white/10 rounded-2xl px-4.5 py-2 text-xs text-cyan-455 font-mono focus:outline-none cursor-pointer"
+                        className="w-full bg-[#0c0c0c] border border-white/10 hover:border-white/20 focus:border-[#00F5FF]/45 rounded-2xl px-4 py-2.5 text-xs text-white font-mono focus:outline-none cursor-pointer h-[42px] mt-0.5"
                       >
                         <option value={365}>Daily compounding (365/year)</option>
                         <option value={12}>Monthly compounding (12/year)</option>
@@ -1729,15 +1666,14 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                       </select>
                     </div>
 
-                    <div className="col-span-2">
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Compound Period (Years)</span>
-                        <span className="text-[#00F5FF]">{ciYears} Years</span>
-                      </div>
-                      <input 
-                        type="range" min="1" max="40" value={ciYears} 
-                        onChange={(e) => setCiYears(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
+                    <div className="sm:col-span-2">
+                      <CompactInput
+                        label="Compound Period"
+                        value={ciYears}
+                        onChange={setCiYears}
+                        suffix="Years"
+                        min={1}
+                        max={50}
                       />
                     </div>
                   </div>
@@ -1801,93 +1737,77 @@ export function FinancialCalculators({ displayCurrency, exchangeRates }: Financi
                     <Scale className="w-5 h-5 text-[#00F5FF]" />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Annual Gross Salary / Profit</span>
-                        <span className="text-[#00F5FF]">₹{taxSalary.toLocaleString("en-IN")}</span>
-                      </div>
-                      <input 
-                        type="range" min="100000" max="5000000" step="50000" value={taxSalary} 
-                        onChange={(e) => setTaxSalary(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CompactInput
+                      label="Annual Gross Salary / Profit"
+                      value={taxSalary}
+                      onChange={setTaxSalary}
+                      prefix="₹"
+                      isCurrency={true}
+                      currencyCode="INR"
+                    />
 
-                    <div>
-                      <div className="flex justify-between text-xs font-mono font-bold text-white/50 mb-1">
-                        <span>Other Income (Rent, Interest, CapGains)</span>
-                        <span className="text-[#00F5FF]">₹{taxOther.toLocaleString("en-IN")}</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="1000000" step="20000" value={taxOther} 
-                        onChange={(e) => setTaxOther(Number(e.target.value))}
-                        className="w-full accent-[#00F5FF] cursor-pointer"
-                      />
-                    </div>
+                    <CompactInput
+                      label="Other Income (Rent, Interest, CapGains)"
+                      value={taxOther}
+                      onChange={setTaxOther}
+                      prefix="₹"
+                      isCurrency={true}
+                      currencyCode="INR"
+                    />
 
-                    <div className="col-span-2 flex items-center gap-3 bg-white/[0.02] p-3 rounded-2xl border border-white/5">
+                    <div className="sm:col-span-2 flex items-center gap-3 bg-white/[0.02] p-3.5 rounded-2xl border border-white/5 mt-1">
                       <input 
                         type="checkbox" checked={taxIsSalaried} id="taxIsSalaried"
                         onChange={(e) => setTaxIsSalaried(e.target.checked)}
-                        className="w-4 h-4 accent-[#00F5FF] cursor-pointer"
+                        className="w-4.5 h-4.5 rounded-lg accent-[#00F5FF] cursor-pointer"
                       />
-                      <label htmlFor="taxIsSalaried" className="text-xs font-sans text-white/80 cursor-pointer">
+                      <label htmlFor="taxIsSalaried" className="text-xs font-sans text-white/80 cursor-pointer select-none">
                         Is Salaried Individual? (Enables standard deductions of ₹75,000 for New Regime, ₹50,000 for Old Regime)
                       </label>
                     </div>
 
                     {/* Old Regime settings */}
-                    <div className="col-span-2 border-t border-white/5 pt-4">
+                    <div className="sm:col-span-2 border-t border-white/5 pt-4 mt-2">
                       <span className="text-[10px] font-mono text-white/40 block font-bold uppercase tracking-wider mb-3">EXEMPTIONS & DEDUCTIONS FOR OLD REGIME SENSITIVITY</span>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <div className="flex justify-between text-[11px] font-mono text-white/50 mb-1">
-                            <span>Sec 80C Deductions (ELSS/PPF/LIC)</span>
-                            <span>₹{tax80C.toLocaleString("en-IN")} (Max 1.5L)</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="150000" step="10000" value={tax80C} 
-                            onChange={(e) => setTax80C(Number(e.target.value))}
-                            className="w-full accent-[#00F5FF] cursor-pointer"
-                          />
-                        </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <CompactInput
+                          label="Sec 80C Deductions (ELSS/PPF/LIC)"
+                          value={tax80C}
+                          onChange={(val) => setTax80C(Math.min(150000, val))}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                          suffix="(Max 1.5L)"
+                        />
 
-                        <div>
-                          <div className="flex justify-between text-[11px] font-mono text-white/50 mb-1">
-                            <span>Sec 80D (Health Insurance premium)</span>
-                            <span>₹{tax80D.toLocaleString("en-IN")} (Max 75k)</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="75000" step="5000" value={tax80D} 
-                            onChange={(e) => setTax80D(Number(e.target.value))}
-                            className="w-full accent-[#00F5FF] cursor-pointer"
-                          />
-                        </div>
+                        <CompactInput
+                          label="Sec 80D (Health Premium)"
+                          value={tax80D}
+                          onChange={(val) => setTax80D(Math.min(75000, val))}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                          suffix="(Max 75k)"
+                        />
 
-                        <div>
-                          <div className="flex justify-between text-[11px] font-mono text-white/50 mb-1">
-                            <span>Sec 24b / Rent HRA Exemption</span>
-                            <span>₹{taxHomeLoanRent.toLocaleString("en-IN")}</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="300000" step="10000" value={taxHomeLoanRent} 
-                            onChange={(e) => setTaxHomeLoanRent(Number(e.target.value))}
-                            className="w-full accent-[#00F5FF] cursor-pointer"
-                          />
-                        </div>
+                        <CompactInput
+                          label="Sec 24b / Rent HRA Exemption"
+                          value={taxHomeLoanRent}
+                          onChange={setTaxHomeLoanRent}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
 
-                        <div>
-                          <div className="flex justify-between text-[11px] font-mono text-white/50 mb-1">
-                            <span>Other exemptions / Sec 10 / professional tax</span>
-                            <span>₹{taxSection10.toLocaleString("en-IN")}</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="100000" step="5000" value={taxSection10} 
-                            onChange={(e) => setTaxSection10(Number(e.target.value))}
-                            className="w-full accent-[#00F5FF] cursor-pointer"
-                          />
-                        </div>
+                        <CompactInput
+                          label="Other exemptions / Sec 10"
+                          value={taxSection10}
+                          onChange={setTaxSection10}
+                          prefix="₹"
+                          isCurrency={true}
+                          currencyCode="INR"
+                        />
                       </div>
                     </div>
                   </div>
