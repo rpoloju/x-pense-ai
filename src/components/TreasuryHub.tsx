@@ -35,6 +35,15 @@ import {
 import { Transaction, TreasuryPot, FinancialGoal } from "../types";
 import { convertAmount, formatCurrencyValue } from "../utils/currencyUtils";
 
+export interface Subscription {
+  id: string;
+  name: string;
+  cost: number;
+  category: string;
+  period: string;
+  nextRenewal: string;
+}
+
 interface TreasuryHubProps {
   transactions: Transaction[];
   displayCurrency: string;
@@ -215,7 +224,7 @@ export function TreasuryHub({ transactions, displayCurrency, exchangeRates }: Tr
   };
 
   // --- 4. SMART SUBSCRIPTIONS REGISTRY STATE ---
-  const [subscriptions, setSubscriptions] = useState(() => {
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>(() => {
     const stored = localStorage.getItem("aura_smart_subscriptions");
     if (stored) {
       try { return JSON.parse(stored); } catch { }
@@ -249,14 +258,14 @@ export function TreasuryHub({ transactions, displayCurrency, exchangeRates }: Tr
       period: "Monthly",
       nextRenewal: newSubNextDate || new Date().toISOString().split('T')[0]
     };
-    setSubscriptions(prev => [freshSub, ...prev]);
+    setSubscriptions((prev: Subscription[]) => [freshSub, ...prev]);
     setIsNewSubModalOpen(false);
     setNewSubName("");
     setNewSubCost(1500);
   };
 
   const handleDeleteSub = (id: string) => {
-    setSubscriptions(prev => prev.filter(s => s.id !== id));
+    setSubscriptions((prev: Subscription[]) => prev.filter((s: Subscription) => s.id !== id));
   };
 
   // Sweep current transactions for suspicious recurring software subscriptions
@@ -284,7 +293,7 @@ export function TreasuryHub({ transactions, displayCurrency, exchangeRates }: Tr
 
   // Combined totals inside subscriptions
   const subscriptionAnnualDrain = useMemo(() => {
-    return subscriptions.reduce((sum, s) => {
+    return subscriptions.reduce((sum: number, s: Subscription) => {
       const conversionUSDInPreset = convertAmount(s.cost, "INR", displayCurrency, exchangeRates);
       // If s.period is Yearly, just add conversion, else multiply by 12
       return sum + (s.period === "Yearly" ? conversionUSDInPreset : conversionUSDInPreset * 12);
@@ -677,7 +686,7 @@ export function TreasuryHub({ transactions, displayCurrency, exchangeRates }: Tr
 
             {/* SUBSCRIBERS LISTING */}
             <div className="space-y-3.5">
-              {subscriptions.map((sub) => {
+              {subscriptions.map((sub: Subscription) => {
                 const specCost = convertAmount(sub.cost, "INR", displayCurrency, exchangeRates);
                 const daysToRenewal = Math.max(0, Math.ceil((new Date(sub.nextRenewal).getTime() - Date.now()) / (1000 * 3600 * 24)));
 
