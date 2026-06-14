@@ -1,9 +1,10 @@
 {
-  "apiKey": "",
-  "authDomain": "",
-  "projectId": "",
-  "storageBucket": "",
-  "messagingSenderId": "",
-  "appId": "",
-  "firestoreDatabaseId": ""
+  "projectId": "smooth-charmer-f6tp2",
+  "appId": "1:653673883873:web:014a4e13708bb0e2e7afa0",
+  "apiKey": "AIzaSyAR7dKVv49GoD1eRberHqORLRkmE0lNiTo",
+  "authDomain": "smooth-charmer-f6tp2.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-f31a145e-600f-41e4-b09e-e3c578607e52",
+  "storageBucket": "smooth-charmer-f6tp2.firebasestorage.app",
+  "messagingSenderId": "653673883873",
+  "measurementId": ""
 }

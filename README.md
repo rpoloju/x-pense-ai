@@ -105,3 +105,35 @@ To sideload the native Aura APK on your phone, follow these steps:
 2. Open your favorite **Files** manager app on your Android phone and select the transfered `.apk`.
 3. If prompted with *“Install from Unknown Sources”* safety prompts, tap **Settings** and toggle **Allow installation from this source**.
 4. Tap **Install** and launch Aura immediately from your phone desktop grid!
+
+---
+
+## ☁️ Firebase Cloud Sync & Upgrades Deep-Dive
+
+This section explains how your transaction history and settings are preserved when upgrading Aura or switching to a new device, and how the synchronization protocol secures and manages your financial ledgers.
+
+### 🌐 1. How the App Identifies Your Device
+Your device's secure identity relies on **Firebase Authentication** and **Firebase Firestore** integration:
+* **Secure Google Authentication**: In the profile menu container, you can trigger the **Sync to Google Cloud** gateway, which authenticates you securely using your standard Google Account.
+* **Persistent Authentication State**: Firebase Auth stores secure OAuth credentials locally. When you launch the app (even after closing it entirely or rebooting your phone), the auth state listener is verified silently in the background, matching you with your unique, immutable cloud user identifier (`uid`).
+* **Multi-Device Support**: Because identification is tied to your Google Account (not to specific device hardware), your ledger can be synchronized simultaneously across multiple smartphones, tablets, or desktop web browsers.
+
+### 🔄 2. The Cloud Synchronization Protocol
+Aura runs a reliable backup and reconciliation loop designed to prevent accidental data loss:
+* **Instant Cloud Backups**: Whenever you add, edit, or delete a transaction, calculate savings, or update your profiles, Aura automatically fires write operations to your Firestore document vaults.
+* **Intelligent Double-Sided Reconciliation (Merge State)**:
+  1. On application startup or when Google Auth triggers, Aura retrieves your cloud-stored ledger from Firestore.
+  2. It performs a **two-sided merge reconciliation** based on transaction ID hashes:
+     * If a transaction is found in the cloud database but is missing in the local database (such as logs created on another phone), it is downloaded and synced immediately.
+     * If a transaction exists locally but is not yet stored in the cloud (such as logs added while offline), the app appends it safely and issues an automatic backup command to upload the missing records.
+     * Profile preferences (custom username, monthly budget ceilings, visual avatar choices) are synchronized and synchronized from the central cloud database as well.
+
+### 📲 3. Installing App Upgrades (APK Upgrades)
+When you build a new application version and install it on top of an existing version on your smartphone (such as side-loading another compiled `.apk`), your data is completely safe:
+* **Storage Sandbox Preservation**: Android respects local storage domains. Placing a new app update on top of the old version preserves the internal `localStorage` sandbox and secure auth state cookies. Your logged details and user settings will load automatically on launch.
+* **Automatic Cloud Restoration**: Even if you delete your data, clear browser caches, or uninstall the app completely:
+  1. Simply tap **Sync to Google Cloud** in the visual profile panel and complete Google sign-in.
+  2. Tap the **Restore** portal in the Cloud Crypt Vault.
+  3. Aura will securely fetch your entire transaction repository and reconstruct your financial canvas to 100% completion in real-time.
+* **No-Loss Migration Guarantee**: If there are changes to fields or properties in future releases, the reconciliation logic converts older schema entities into modern shapes without removing any field histories.
+

@@ -31,15 +31,29 @@ import {
   Command,
   HelpCircle,
   Edit3,
-  Check
+  Check,
+  Cloud,
+  RefreshCw,
+  UploadCloud,
+  DownloadCloud
 } from "lucide-react";
 
 import { Transaction, Budget } from "./types";
 import { INITIAL_TRANSACTIONS, CATEGORIES } from "./data";
 import { 
   auth, 
-  isFirebaseConfigured
+  isFirebaseConfigured,
+  loginWithGoogle,
+  logoutUser,
+  saveCloudUserProfile,
+  backupTransactionsToCloud,
+  fetchTransactionsFromCloud,
+  syncSingleTransactionToCloud,
+  deleteSingleTransactionFromCloud
 } from "./lib/firebase";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "./lib/firebase";
 import { Dashboard } from "./components/Dashboard";
 import { TransactionHistory } from "./components/TransactionHistory";
 import { TreasuryHub } from "./components/TreasuryHub";
@@ -110,10 +124,121 @@ export default function App() {
         const base64 = event.target?.result as string;
         setProfilePic(base64);
         localStorage.setItem("aura_profile_pic", base64);
+        if (currentUser) {
+          saveCloudUserProfile(currentUser.uid, {
+            name: userName,
+            profilePic: base64,
+            monthlyBudget
+          }).catch(console.error);
+        }
       };
       reader.readAsDataURL(file);
     }
   };
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [syncStatus, setSyncStatus] = useState<"synced" | "syncing" | "offline" | "error">("offline");
+  const [lastSyncText, setLastSyncText] = useState<string>("Local-only mode");
+
+  // Authentication State Listener & Synced-ledger Merging
+  useEffect(() => {
+    if (!auth) return;
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user);
+        setSyncStatus("syncing");
+        setLastSyncText("Loading financial cloud cache...");
+        
+        try {
+          // 1. Load profile configurations
+          let cloudName = user.displayName || "";
+          let cloudBudget = 60000;
+          let cloudProfilePic = "preset-1";
+
+          if (db) {
+            const userDocRef = doc(db, "users", user.uid);
+            const userSnap = await getDoc(userDocRef);
+            if (userSnap.exists()) {
+              const uData = userSnap.data();
+              if (uData.name) cloudName = uData.name;
+              if (uData.monthlyBudget) cloudBudget = Number(uData.monthlyBudget);
+              if (uData.profilePic) cloudProfilePic = uData.profilePic;
+            } else {
+              // Write a default cloud snapshot safely
+              await saveCloudUserProfile(user.uid, {
+                name: userName || user.displayName || "Aura User",
+                profilePic: profilePic || "preset-1",
+                monthlyBudget: monthlyBudget
+              });
+            }
+          }
+
+          // 2. Fetch transaction ledgers from the cloud
+          const cloudTxs = await fetchTransactionsFromCloud(user.uid);
+          
+          // 3. Robust Ledger Reconciliation (Union-by-ID local merge)
+          const storedTx = localStorage.getItem("aura_transactions");
+          let localTxs: Transaction[] = [];
+          if (storedTx) {
+            try {
+              localTxs = JSON.parse(storedTx);
+            } catch {
+              localTxs = [];
+            }
+          }
+
+          // Merge: cloud items reconcile, unique local entries survive and back up
+          const mergedTxs = [...localTxs];
+          cloudTxs.forEach((ctx) => {
+            const index = mergedTxs.findIndex((ltx) => ltx.id === ctx.id);
+            if (index >= 0) {
+              mergedTxs[index] = ctx; // Cloud authoritative update
+            } else {
+              mergedTxs.push(ctx);    // Cloud arrival
+            }
+          });
+
+          // Upload any unsynced local-only records back up
+          const unbackedLocal = localTxs.filter(
+            (ltx) => !cloudTxs.some((ctx) => ctx.id === ltx.id)
+          );
+
+          if (unbackedLocal.length > 0) {
+            await backupTransactionsToCloud(user.uid, mergedTxs);
+          }
+
+          setTransactions(mergedTxs);
+          localStorage.setItem("aura_transactions", JSON.stringify(mergedTxs));
+
+          if (cloudName) {
+            setUserName(cloudName);
+            localStorage.setItem("aura_user_name", cloudName);
+          }
+          if (cloudBudget) {
+            setMonthlyBudget(cloudBudget);
+            localStorage.setItem("aura_monthly_budget", String(cloudBudget));
+          }
+          if (cloudProfilePic) {
+            setProfilePic(cloudProfilePic);
+            localStorage.setItem("aura_profile_pic", cloudProfilePic);
+          }
+
+          setSyncStatus("synced");
+          setLastSyncText("Cloud Safe Vault Active");
+        } catch (err) {
+          console.error("Cloud synchronization mismatch:", err);
+          setSyncStatus("error");
+          setLastSyncText("Sync interrupted. Local cache active.");
+        }
+      } else {
+        setCurrentUser(null);
+        setSyncStatus("offline");
+        setLastSyncText("Local-only mode");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [auth]);
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>(() => {
     try {
@@ -339,10 +464,23 @@ export default function App() {
 
 
 
-  // Update localStorage helper
+  // Update localStorage helper & backup to Cloud
   const syncTransactions = (updated: Transaction[]) => {
     setTransactions(updated);
     localStorage.setItem("aura_transactions", JSON.stringify(updated));
+    if (currentUser) {
+      setSyncStatus("syncing");
+      backupTransactionsToCloud(currentUser.uid, updated)
+        .then(() => {
+          setSyncStatus("synced");
+          setLastSyncText("Cloud Safe Vault Synced");
+        })
+        .catch((err) => {
+          console.error("Cloud synchronization failed:", err);
+          setSyncStatus("error");
+          setLastSyncText("Sync offline / pending connection");
+        });
+    }
   };
 
   const handleUpdateDisplayCurrency = (currencyCode: string) => {
@@ -390,6 +528,23 @@ export default function App() {
   const handleUpdateMonthlyBudget = (limit: number) => {
     setMonthlyBudget(limit);
     localStorage.setItem("aura_monthly_budget", String(limit));
+    if (currentUser) {
+      setSyncStatus("syncing");
+      saveCloudUserProfile(currentUser.uid, {
+        name: userName,
+        profilePic,
+        monthlyBudget: limit
+      })
+        .then(() => {
+          setSyncStatus("synced");
+          setLastSyncText("Budget cloud profile updated");
+        })
+        .catch((err) => {
+          console.error("Cloud profile sync failed:", err);
+          setSyncStatus("error");
+          setLastSyncText("Sync offline / pending connection");
+        });
+    }
   };
 
   const handleUpdateCategoryBudget = (category: string, limit: number) => {
@@ -731,6 +886,15 @@ export default function App() {
                                       setUserName(val);
                                       localStorage.setItem("aura_user_name", val);
                                     }}
+                                    onBlur={() => {
+                                      if (currentUser) {
+                                        saveCloudUserProfile(currentUser.uid, {
+                                          name: userName,
+                                          profilePic,
+                                          monthlyBudget
+                                        }).catch(console.error);
+                                      }
+                                    }}
                                     className="bg-transparent text-[10px] text-cyan-400 border-b border-white/10 pb-0.5 font-mono focus:outline-none focus:border-cyan-400 w-24 px-0.5"
                                     placeholder="Update name"
                                   />
@@ -755,6 +919,13 @@ export default function App() {
                                       onClick={() => {
                                         setProfilePic(presetId);
                                         localStorage.setItem("aura_profile_pic", presetId);
+                                        if (currentUser) {
+                                          saveCloudUserProfile(currentUser.uid, {
+                                            name: userName,
+                                            profilePic: presetId,
+                                            monthlyBudget
+                                          }).catch(console.error);
+                                        }
                                       }}
                                       className={`w-5.5 h-5.5 rounded-full bg-gradient-to-tr ${presetGrad} border transition-all cursor-pointer relative flex items-center justify-center ${
                                         isSelected ? "border-cyan-400 scale-105" : "border-white/15 hover:scale-105"
@@ -779,6 +950,145 @@ export default function App() {
                                   }} 
                                   className="hidden" 
                                 />
+                              </div>
+                            </div>
+
+                            {/* Cloud Crypt Vault (Firebase Sync Hub) */}
+                            <div className="py-3 px-4 bg-cyan-950/10 border-t border-b border-white/5 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[8px] font-mono text-cyan-400 font-bold tracking-widest uppercase">CLOUD CRYPT VAULT</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${
+                                    syncStatus === "synced" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)] animate-pulse" :
+                                    syncStatus === "syncing" ? "bg-amber-400 animate-spin" :
+                                    syncStatus === "error" ? "bg-rose-500 animate-bounce" :
+                                    "bg-white/20"
+                                  }`} />
+                                  <span className="text-[7.5px] font-mono text-white/40 uppercase font-bold">{syncStatus}</span>
+                                </div>
+                              </div>
+
+                              {currentUser ? (
+                                <div className="space-y-2">
+                                  <div className="bg-white/[0.02] border border-white/5 rounded-lg p-2 flex items-center justify-between gap-1.5">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-[9px] font-mono text-white/50 truncate uppercase leading-none">SECURED BY GOOGLE</p>
+                                      <p className="text-[10px] font-sans font-bold text-white truncate mt-1 leading-none">{currentUser.email}</p>
+                                    </div>
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          await logoutUser();
+                                        } catch (e) {
+                                          console.error(e);
+                                        }
+                                      }}
+                                      className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-[9px] font-mono text-rose-400 border border-rose-500/10 hover:border-rose-500/20 transition-all cursor-pointer font-bold uppercase shrink-0"
+                                      title="Sign out of Google Vault"
+                                    >
+                                      Exit
+                                    </button>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={async () => {
+                                        setSyncStatus("syncing");
+                                        setLastSyncText("Publishing ledgers to cloud...");
+                                        try {
+                                          await backupTransactionsToCloud(currentUser.uid, transactions);
+                                          await saveCloudUserProfile(currentUser.uid, {
+                                            name: userName,
+                                            profilePic,
+                                            monthlyBudget
+                                          });
+                                          setSyncStatus("synced");
+                                          setLastSyncText("Vault backup complete");
+                                        } catch (err) {
+                                          setSyncStatus("error");
+                                          setLastSyncText("Upload rejected");
+                                        }
+                                      }}
+                                      disabled={syncStatus === "syncing"}
+                                      className="flex-1 py-1.5 rounded-lg bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/10 hover:border-cyan-500/30 text-[9px] font-mono font-bold text-cyan-400 flex items-center justify-center gap-1 cursor-pointer transition-all uppercase"
+                                      title="Overwrites cloud data with your current local state"
+                                    >
+                                      <UploadCloud className="w-2.5 h-2.5" />
+                                      <span>Backup</span>
+                                    </button>
+
+                                    <button
+                                      onClick={async () => {
+                                        setSyncStatus("syncing");
+                                        setLastSyncText("Reloading account ledger...");
+                                        try {
+                                          const cloudTxs = await fetchTransactionsFromCloud(currentUser.uid);
+                                          setTransactions(cloudTxs);
+                                          localStorage.setItem("aura_transactions", JSON.stringify(cloudTxs));
+                                          
+                                          // Refresh profile if present
+                                          if (db) {
+                                            const s = await getDoc(doc(db, "users", currentUser.uid));
+                                            if (s.exists()) {
+                                              const d = s.data();
+                                              if (d.name) {
+                                                setUserName(d.name);
+                                                localStorage.setItem("aura_user_name", d.name);
+                                              }
+                                              if (d.profilePic) {
+                                                setProfilePic(d.profilePic);
+                                                localStorage.setItem("aura_profile_pic", d.profilePic);
+                                              }
+                                              if (d.monthlyBudget) {
+                                                setMonthlyBudget(Number(d.monthlyBudget));
+                                                localStorage.setItem("aura_monthly_budget", String(d.monthlyBudget));
+                                              }
+                                            }
+                                          }
+                                          setSyncStatus("synced");
+                                          setLastSyncText("Cloud restore complete");
+                                        } catch (err) {
+                                          setSyncStatus("error");
+                                          setLastSyncText("Download rejected");
+                                        }
+                                      }}
+                                      disabled={syncStatus === "syncing"}
+                                      className="flex-1 py-1.5 rounded-lg bg-purple-500/5 hover:bg-purple-500/10 border border-purple-500/10 hover:border-purple-500/30 text-[9px] font-mono font-bold text-purple-400 flex items-center justify-center gap-1 cursor-pointer transition-all uppercase"
+                                      title="Overwrites local dataset with cloud data"
+                                    >
+                                      <DownloadCloud className="w-2.5 h-2.5" />
+                                      <span>Restore</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-2">
+                                  <p className="text-[10px] font-sans text-white/50 leading-relaxed font-medium">
+                                    Secure and synchronize your transactions real-time across multiple devices.
+                                  </p>
+                                  <button
+                                    onClick={async () => {
+                                      setSyncStatus("syncing");
+                                      setLastSyncText("Authenticating Google secure...");
+                                      try {
+                                        await loginWithGoogle();
+                                      } catch (err) {
+                                        console.error("Google login failed:", err);
+                                        setSyncStatus("error");
+                                        setLastSyncText("Verification dismissed");
+                                      }
+                                    }}
+                                    className="w-full py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-[10px] font-mono font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/10 border border-cyan-400/20 active:scale-[0.98] transition-all"
+                                  >
+                                    <Cloud className="w-3.5 h-3.5" />
+                                    <span>Sync to Google Cloud</span>
+                                  </button>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between text-[7px] font-mono text-white/30 uppercase pt-1">
+                                <span>STATUS REGISTER:</span>
+                                <span>{lastSyncText}</span>
                               </div>
                             </div>
 
